@@ -62,7 +62,7 @@ export class AcpConnection {
 
     const args = this.options.args ?? [];
     log(`profile env overrides: ${formatEnv(this.options.env)}`);
-    log(`spawning: ${this.options.command} ${args.join(" ")}`);
+    log(`spawning: ${this.options.command} ${args.join(" ")} (cwd: ${this.options.cwd ?? process.cwd()})`);
 
     const proc = spawn(this.options.command, args, {
       stdio: ["pipe", "pipe", "inherit"],

@@ -71,7 +71,7 @@ export class AcpAgent implements Agent {
       cwd: this.options.cwd ?? process.cwd(),
       mcpServers: [],
     });
-    log(`session created: ${res.sessionId}`);
+    log(`session created: ${res.sessionId}, cwd: ${this.options.cwd ?? process.cwd()}`);
     this.sessions.set(conversationId, res.sessionId);
     return res.sessionId;
   }
