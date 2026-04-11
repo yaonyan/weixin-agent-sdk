@@ -29,11 +29,11 @@ import {
 import type { AcpAgentOptions } from "./src/types.js";
 
 /** Built-in agent shortcuts */
-const BUILTIN_AGENTS: Record<string, { command: string; args?: string[] }> = {
+const BUILTIN_AGENTS: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {
   "claude-code": { command: "claude-agent-acp" },
   codex: { command: "codex-acp" },
   copilot: { command: "copilot", args: ["--acp"] },
-  codebuddy: { command: "cmd", args: ["/c", "codebuddy.cmd", "--acp"] },
+  codebuddy: { command: "cmd", args: ["/c", "codebuddy.cmd", "--acp"], env: { CODEBUDDY_DEFER_TOOL_LOADING: "false" } },
 };
 
 const cliCommand = process.argv[2];
@@ -45,10 +45,10 @@ async function ensureLoggedIn() {
   }
 }
 
-async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string) {
+async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string, acpEnv?: Record<string, string>) {
   await ensureLoggedIn();
 
-  const agentOptions: AcpAgentOptions = { command: acpCommand, args: acpArgs };
+  const agentOptions: AcpAgentOptions = { command: acpCommand, args: acpArgs, env: acpEnv };
   const agent = new AcpAgent(agentOptions, profileName);
 
   const ac = new AbortController();
@@ -77,15 +77,15 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       const config = loadAcpConfig();
       const profile = config.profiles[name];
       if (!profile) return undefined;
-      const newOptions: AcpAgentOptions = { command: profile.command, args: profile.args };
+      const newOptions: AcpAgentOptions = { command: profile.command, args: profile.args, env: profile.env };
       await agent.switchProfile(name, newOptions);
       setActiveProfile(config, name);
       saveAcpConfig(config);
       return name;
     },
-    onAdd: async (name: string, cmd: string, args: string[]): Promise<string | undefined> => {
+    onAdd: async (name: string, cmd: string, args: string[], env?: Record<string, string>): Promise<string | undefined> => {
       const config = loadAcpConfig();
-      addProfile(config, name, cmd, args);
+      addProfile(config, name, cmd, args, env);
       saveAcpConfig(config);
       return name;
     },
@@ -104,6 +104,7 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
         const newOptions: AcpAgentOptions = {
           command: defaultProfile.command,
           args: defaultProfile.args,
+          env: defaultProfile.env,
         };
         await agent.switchProfile(defaultName, newOptions);
         setActiveProfile(config, defaultName);
@@ -124,13 +125,14 @@ function resolveInitialCommand(cliCommand?: string, cliArgs?: string[]): {
   command: string;
   args: string[];
   profileName?: string;
+  env?: Record<string, string>;
 } {
   // Try to use saved active profile
   const config = loadAcpConfig();
   const active = getActiveProfile(config);
   if (active) {
     console.log(`[acp] 使用已保存的 profile: ${config.activeProfile} (${active.command})`);
-    return { command: active.command, args: active.args ?? [], profileName: config.activeProfile };
+    return { command: active.command, args: active.args ?? [], profileName: config.activeProfile, env: active.env };
   }
 
   // Fall back to CLI args
@@ -175,21 +177,21 @@ async function main() {
     saveAcpConfig(config);
 
     const resolved = resolveInitialCommand(acpCommand, acpArgs);
-    await startAgent(resolved.command, resolved.args, resolved.profileName);
+    await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env);
     return;
   }
 
   if (cliCommand && cliCommand in BUILTIN_AGENTS) {
-    const { command: acpCommand, args: acpArgs } = BUILTIN_AGENTS[cliCommand];
+    const { command: acpCommand, args: acpArgs, env: acpEnv } = BUILTIN_AGENTS[cliCommand];
     // Auto-save as profile using the shortcut name
     const config = loadAcpConfig();
-    addProfile(config, cliCommand, acpCommand, acpArgs);
+    addProfile(config, cliCommand, acpCommand, acpArgs, acpEnv);
     setActiveProfile(config, cliCommand);
     setDefaultProfile(config, cliCommand);
     saveAcpConfig(config);
 
     const resolved = resolveInitialCommand(acpCommand, acpArgs);
-    await startAgent(resolved.command, resolved.args, resolved.profileName);
+    await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env);
     return;
   }
 

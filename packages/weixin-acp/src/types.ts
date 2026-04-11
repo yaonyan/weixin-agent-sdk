@@ -3,6 +3,8 @@ export type AcpProfile = {
   command: string;
   /** Command arguments, e.g. [] */
   args?: string[];
+  /** Extra environment variables for the subprocess */
+  env?: Record<string, string>;
 };
 
 export type AcpAgentOptions = {

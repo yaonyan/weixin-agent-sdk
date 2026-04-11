@@ -1,6 +1,8 @@
 import type { Agent } from "../agent/interface.js";
 import type { ProcessMessageDeps } from "../messaging/process-message.js";
 import { getUpdates } from "../api/api.js";
+import type { WeixinMessage, MessageItem } from "../api/types.js";
+import { MessageItemType } from "../api/types.js";
 import { WeixinConfigManager } from "../api/config-cache.js";
 import { SESSION_EXPIRED_ERRCODE, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
 import { processOneMessage } from "../messaging/process-message.js";
@@ -63,6 +65,11 @@ export async function monitorWeixinProvider(opts: MonitorWeixinOpts): Promise<vo
 
   let nextTimeoutMs = longPollTimeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
   let consecutiveFailures = 0;
+
+  // Per-conversation in-flight promise chain.
+  // Slash commands execute immediately (bypassing the chain); normal
+  // messages are serialized per conversation so replies stay ordered.
+  const activeConvos = new Map<string, Promise<void>>();
 
   while (!abortSignal?.aborted) {
     try {
@@ -127,7 +134,7 @@ export async function monitorWeixinProvider(opts: MonitorWeixinOpts): Promise<vo
         const fromUserId = full.from_user_id ?? "";
         const cachedConfig = await configManager.getForUser(fromUserId, full.context_token);
 
-        await processOneMessage(full, {
+        const deps: ProcessMessageDeps = {
           accountId,
           agent,
           baseUrl,
@@ -137,6 +144,28 @@ export async function monitorWeixinProvider(opts: MonitorWeixinOpts): Promise<vo
           log,
           errLog,
           acp: opts.acp,
+        };
+
+        // Slash commands get highest priority: fire-and-forget immediately
+        // so they are never blocked by an active conversation.
+        const textBody = extractTextBody(full.item_list);
+        if (textBody.startsWith("/")) {
+          void processOneMessage(full, deps).catch((err) =>
+            errLog(`[weixin] slash command error: ${String(err)}`),
+          );
+          continue;
+        }
+
+        // Normal messages: chain per-conversation to keep replies ordered.
+        const prev = activeConvos.get(fromUserId) ?? Promise.resolve();
+        const next = prev.then(() => processOneMessage(full, deps)).catch((err) => {
+          errLog(`[weixin] processOneMessage error: ${String(err)}`);
+        });
+        activeConvos.set(fromUserId, next);
+        void next.finally(() => {
+          if (activeConvos.get(fromUserId) === next) {
+            activeConvos.delete(fromUserId);
+          }
         });
       }
     } catch (err) {
@@ -171,4 +200,15 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       { once: true },
     );
   });
+}
+
+/** Extract raw text body from item_list for slash-command detection. */
+function extractTextBody(itemList?: MessageItem[]): string {
+  if (!itemList?.length) return "";
+  for (const item of itemList) {
+    if (item.type === MessageItemType.TEXT && item.text_item?.text != null) {
+      return String(item.text_item.text);
+    }
+  }
+  return "";
 }

@@ -45,8 +45,8 @@ export function saveAcpConfig(config: AcpConfig): void {
   fs.writeFileSync(filePath, JSON.stringify(config, null, 2), "utf-8");
 }
 
-export function addProfile(config: AcpConfig, name: string, command: string, args?: string[]): void {
-  config.profiles[name] = { command, args: args?.length ? args : undefined };
+export function addProfile(config: AcpConfig, name: string, command: string, args?: string[], env?: Record<string, string>): void {
+  config.profiles[name] = { command, args: args?.length ? args : undefined, env: env && Object.keys(env).length > 0 ? env : undefined };
 }
 
 export function removeProfile(config: AcpConfig, name: string): boolean {

@@ -36,10 +36,12 @@ export interface SlashCommandContext {
   onClear?: () => void;
   /** Called when /restart is invoked to restart the underlying agent. */
   onRestart?: () => Promise<void> | void;
+  /** Called when /stop is invoked to cancel the active prompt turn. */
+  onStop?: (conversationId: string) => Promise<void>;
   /** Called when /acp <name> is invoked to switch the ACP profile. Returns the new profile name on success. */
   onAcpSwitch?: (profileName: string) => Promise<string | undefined>;
   /** Called when /acp add <name> <command> [args...] is invoked. Returns the profile name on success. */
-  onAcpAdd?: (name: string, command: string, args: string[]) => Promise<string | undefined>;
+  onAcpAdd?: (name: string, command: string, args: string[], env?: Record<string, string>) => Promise<string | undefined>;
   /** Called when /acp rm <name> is invoked. Returns the removed profile name on success. */
   onAcpRm?: (name: string) => Promise<string | undefined>;
   /** Get the current ACP profile name. */
@@ -65,6 +67,7 @@ function buildHelpText(): string {
     "可用命令",
     "/help - 显示帮助信息",
     "/status - 查看当前状态",
+    "/stop - 停止当前对话",
     "/echo <message> - 直接回复并显示通道耗时",
     "/toggle-debug - 开关 debug 模式",
     "/verbose - 开关 verbose 模式",
@@ -86,6 +89,7 @@ function buildStatusText(ctx: SlashCommandContext): string {
     `Base URL: ${account.baseUrl}`,
     `Debug: ${isDebugMode(ctx.accountId) ? "开启" : "关闭"}`,
     `Verbose: ${isVerboseMode(ctx.accountId) ? "开启" : "关闭"}`,
+    `Stop: ${ctx.onStop ? "支持" : "不支持"}`,
     `Restart: ${ctx.onRestart ? "支持" : "不支持"}`,
   ];
   if (ctx.acpProfileName !== undefined) {
@@ -175,6 +179,15 @@ export async function handleSlashCommand(
       case "/clear": {
         ctx.onClear?.();
         await sendReply(ctx, "✅ 会话已清除，重新开始对话");
+        return { handled: true };
+      }
+      case "/stop": {
+        if (!ctx.onStop) {
+          await sendReply(ctx, "当前 agent 不支持 /stop");
+          return { handled: true };
+        }
+        await ctx.onStop(ctx.to);
+        await sendReply(ctx, "✅ 已停止当前对话");
         return { handled: true };
       }
       case "/restart": {

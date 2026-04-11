@@ -16,6 +16,11 @@ function log(msg: string) {
   console.log(`[acp] ${msg}`);
 }
 
+function formatEnv(env?: Record<string, string>): string {
+  if (!env || Object.keys(env).length === 0) return "(none)";
+  return JSON.stringify(env);
+}
+
 function describeToolCall(update: {
   title?: string | null;
   kind?: string | null;
@@ -56,6 +61,7 @@ export class AcpConnection {
     }
 
     const args = this.options.args ?? [];
+    log(`profile env overrides: ${formatEnv(this.options.env)}`);
     log(`spawning: ${this.options.command} ${args.join(" ")}`);
 
     const proc = spawn(this.options.command, args, {
@@ -127,6 +133,19 @@ export class AcpConnection {
     this.connection = conn;
     this.ready = true;
     return conn;
+  }
+
+  /**
+   * Cancel an ongoing prompt turn for a session.
+   * Sends a session/cancel notification to the ACP agent subprocess.
+   */
+  async cancelSession(sessionId: SessionId): Promise<void> {
+    if (!this.ready || !this.connection) {
+      log(`cancelSession: connection not ready, ignoring (session=${sessionId})`);
+      return;
+    }
+    log(`cancelling session=${sessionId}`);
+    await this.connection.cancel({ sessionId });
   }
 
   /**

@@ -47,14 +47,18 @@ export class AcpAgent implements Agent {
 
     const collector = new ResponseCollector(request.onToolCall);
     this.connection.registerCollector(sessionId, collector);
+    let promptResponse: { stopReason?: string } | undefined;
     try {
-      await conn.prompt({ sessionId, prompt: blocks });
+      promptResponse = await conn.prompt({ sessionId, prompt: blocks });
     } finally {
       this.connection.unregisterCollector(sessionId);
     }
 
     const response = await collector.toResponse();
-    log(`response: ${response.text?.slice(0, 80) ?? "[no text]"}${response.media ? " +media" : ""}`);
+    if (promptResponse?.stopReason === "cancelled") {
+      response.cancelled = true;
+    }
+    log(`response: ${response.text?.slice(0, 80) ?? "[no text]"}${response.media ? " +media" : ""}${response.cancelled ? " (cancelled)" : ""}`);
     return response;
   }
 
@@ -95,6 +99,20 @@ export class AcpAgent implements Agent {
   /** Get the name of the currently active profile. */
   get profileName(): string | undefined {
     return this.currentProfileName;
+  }
+
+  /**
+   * Cancel the active prompt turn for a conversation.
+   * Sends a session/cancel notification to the ACP agent.
+   */
+  async stop(conversationId: string): Promise<void> {
+    const sessionId = this.sessions.get(conversationId);
+    if (!sessionId) {
+      log(`stop: no active session for conversation=${conversationId}`);
+      return;
+    }
+    log(`stop: cancelling conversation=${conversationId} (session=${sessionId})`);
+    await this.connection.cancelSession(sessionId);
   }
 
   /**

@@ -163,7 +163,7 @@ export type ProcessMessageDeps = {
     defaultProfileName?: string;
     profileNames?: string[];
     onSwitch?: (profileName: string) => Promise<string | undefined>;
-    onAdd?: (name: string, command: string, args: string[]) => Promise<string | undefined>;
+    onAdd?: (name: string, command: string, args: string[], env?: Record<string, string>) => Promise<string | undefined>;
     onRm?: (name: string) => Promise<string | undefined>;
     onRestart?: () => Promise<void>;
   };
@@ -244,6 +244,9 @@ export async function processOneMessage(
         onRestart: deps.acp?.onRestart ?? (deps.agent.restart
           ? () => deps.agent.restart!()
           : undefined),
+        onStop: deps.agent.stop
+          ? (convId: string) => deps.agent.stop!(convId)
+          : undefined,
         onAcpSwitch: deps.acp?.onSwitch,
         onAcpAdd: deps.acp?.onAdd,
         onAcpRm: deps.acp?.onRm,
@@ -342,6 +345,12 @@ export async function processOneMessage(
   // --- Call agent & send reply ---
   try {
     const response = await deps.agent.chat(request);
+
+    // If the prompt was cancelled by the user, skip sending the AI reply
+    if (response.cancelled) {
+      deps.log("[weixin] prompt cancelled, skipping reply");
+      return;
+    }
 
     // Flush any remaining throttled tool-call messages BEFORE sending the final
     // reply, so that intermediate updates always arrive before the final answer.

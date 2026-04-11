@@ -13,6 +13,8 @@ export interface Agent {
   clearSession?(conversationId: string): void;
   /** Restart the underlying agent backend if supported. */
   restart?(): Promise<void>;
+  /** Cancel the active prompt turn for a conversation. */
+  stop?(conversationId: string): Promise<void>;
 }
 
 export interface ChatRequest {
@@ -45,4 +47,6 @@ export interface ChatResponse {
     /** Filename hint (for file attachments). */
     fileName?: string;
   };
+  /** True if the prompt turn was cancelled by the user (skip sending the reply). */
+  cancelled?: boolean;
 }
