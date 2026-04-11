@@ -1,4 +1,5 @@
 import type { Agent } from "../agent/interface.js";
+import type { ProcessMessageDeps } from "../messaging/process-message.js";
 import { getUpdates } from "../api/api.js";
 import { WeixinConfigManager } from "../api/config-cache.js";
 import { SESSION_EXPIRED_ERRCODE, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
@@ -21,6 +22,7 @@ export type MonitorWeixinOpts = {
   abortSignal?: AbortSignal;
   longPollTimeoutMs?: number;
   log?: (msg: string) => void;
+  acp?: ProcessMessageDeps["acp"];
 };
 
 /**
@@ -134,6 +136,7 @@ export async function monitorWeixinProvider(opts: MonitorWeixinOpts): Promise<vo
           typingTicket: cachedConfig.typingTicket,
           log,
           errLog,
+          acp: opts.acp,
         });
       }
     } catch (err) {

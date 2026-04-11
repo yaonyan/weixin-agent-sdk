@@ -16,14 +16,27 @@
 import { isLoggedIn, login, logout, start } from "weixin-agent-sdk";
 
 import { AcpAgent } from "./src/acp-agent.js";
+import {
+  loadAcpConfig,
+  saveAcpConfig,
+  addProfile,
+  removeProfile,
+  setActiveProfile,
+  setDefaultProfile,
+  getActiveProfile,
+  getDefaultProfile,
+} from "./src/acp-config.js";
+import type { AcpAgentOptions } from "./src/types.js";
 
 /** Built-in agent shortcuts */
-const BUILTIN_AGENTS: Record<string, { command: string }> = {
+const BUILTIN_AGENTS: Record<string, { command: string; args?: string[] }> = {
   "claude-code": { command: "claude-agent-acp" },
   codex: { command: "codex-acp" },
+  copilot: { command: "copilot", args: ["--acp"] },
+  codebuddy: { command: "cmd", args: ["/c", "codebuddy.cmd", "--acp"] },
 };
 
-const command = process.argv[2];
+const cliCommand = process.argv[2];
 
 async function ensureLoggedIn() {
   if (!isLoggedIn()) {
@@ -32,10 +45,11 @@ async function ensureLoggedIn() {
   }
 }
 
-async function startAgent(acpCommand: string, acpArgs: string[] = []) {
+async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string) {
   await ensureLoggedIn();
 
-  const agent = new AcpAgent({ command: acpCommand, args: acpArgs });
+  const agentOptions: AcpAgentOptions = { command: acpCommand, args: acpArgs };
+  const agent = new AcpAgent(agentOptions, profileName);
 
   const ac = new AbortController();
   process.on("SIGINT", () => {
@@ -48,21 +62,93 @@ async function startAgent(acpCommand: string, acpArgs: string[] = []) {
     ac.abort();
   });
 
-  return start(agent, { abortSignal: ac.signal });
+  // ACP profile management callbacks for slash commands
+  const acp = {
+    get profileName() {
+      return agent.profileName;
+    },
+    get defaultProfileName() {
+      return loadAcpConfig().defaultProfile;
+    },
+    get profileNames() {
+      return Object.keys(loadAcpConfig().profiles);
+    },
+    onSwitch: async (name: string): Promise<string | undefined> => {
+      const config = loadAcpConfig();
+      const profile = config.profiles[name];
+      if (!profile) return undefined;
+      const newOptions: AcpAgentOptions = { command: profile.command, args: profile.args };
+      await agent.switchProfile(name, newOptions);
+      setActiveProfile(config, name);
+      saveAcpConfig(config);
+      return name;
+    },
+    onAdd: async (name: string, cmd: string, args: string[]): Promise<string | undefined> => {
+      const config = loadAcpConfig();
+      addProfile(config, name, cmd, args);
+      saveAcpConfig(config);
+      return name;
+    },
+    onRm: async (name: string): Promise<string | undefined> => {
+      const config = loadAcpConfig();
+      const removed = removeProfile(config, name);
+      if (!removed) return undefined;
+      saveAcpConfig(config);
+      return name;
+    },
+    onRestart: async (): Promise<void> => {
+      const config = loadAcpConfig();
+      const defaultName = config.defaultProfile;
+      const defaultProfile = getDefaultProfile(config);
+      if (defaultName && defaultProfile) {
+        const newOptions: AcpAgentOptions = {
+          command: defaultProfile.command,
+          args: defaultProfile.args,
+        };
+        await agent.switchProfile(defaultName, newOptions);
+        setActiveProfile(config, defaultName);
+        saveAcpConfig(config);
+      }
+      await agent.restart();
+    },
+  };
+
+  return start(agent, { abortSignal: ac.signal, acp });
+}
+
+/**
+ * Resolve the initial ACP command from config or CLI args.
+ * Priority: saved activeProfile > CLI arg > default
+ */
+function resolveInitialCommand(cliCommand?: string, cliArgs?: string[]): {
+  command: string;
+  args: string[];
+  profileName?: string;
+} {
+  // Try to use saved active profile
+  const config = loadAcpConfig();
+  const active = getActiveProfile(config);
+  if (active) {
+    console.log(`[acp] 使用已保存的 profile: ${config.activeProfile} (${active.command})`);
+    return { command: active.command, args: active.args ?? [], profileName: config.activeProfile };
+  }
+
+  // Fall back to CLI args
+  return { command: cliCommand ?? "", args: cliArgs ?? [] };
 }
 
 async function main() {
-  if (command === "login") {
+  if (cliCommand === "login") {
     await login();
     return;
   }
 
-  if (command === "logout") {
+  if (cliCommand === "logout") {
     logout();
     return;
   }
 
-  if (command === "start") {
+  if (cliCommand === "start") {
     const ddIndex = process.argv.indexOf("--");
     if (ddIndex === -1 || ddIndex + 1 >= process.argv.length) {
       console.error("错误: 请在 -- 后指定 ACP agent 启动命令");
@@ -71,13 +157,39 @@ async function main() {
     }
 
     const [acpCommand, ...acpArgs] = process.argv.slice(ddIndex + 1);
-    await startAgent(acpCommand, acpArgs);
+    // Save as a profile if not already present
+    const config = loadAcpConfig();
+    const existingEntry = Object.entries(config.profiles).find(
+      ([, p]) => p.command === acpCommand && JSON.stringify(p.args ?? []) === JSON.stringify(acpArgs),
+    );
+    if (existingEntry) {
+      setActiveProfile(config, existingEntry[0]);
+      setDefaultProfile(config, existingEntry[0]);
+    } else {
+      // Use full command+args as a recognizable profile name
+      const autoName = [acpCommand, ...acpArgs].join(" ");
+      addProfile(config, autoName, acpCommand, acpArgs);
+      setActiveProfile(config, autoName);
+      setDefaultProfile(config, autoName);
+    }
+    saveAcpConfig(config);
+
+    const resolved = resolveInitialCommand(acpCommand, acpArgs);
+    await startAgent(resolved.command, resolved.args, resolved.profileName);
     return;
   }
 
-  if (command && command in BUILTIN_AGENTS) {
-    const { command: acpCommand } = BUILTIN_AGENTS[command];
-    await startAgent(acpCommand);
+  if (cliCommand && cliCommand in BUILTIN_AGENTS) {
+    const { command: acpCommand, args: acpArgs } = BUILTIN_AGENTS[cliCommand];
+    // Auto-save as profile using the shortcut name
+    const config = loadAcpConfig();
+    addProfile(config, cliCommand, acpCommand, acpArgs);
+    setActiveProfile(config, cliCommand);
+    setDefaultProfile(config, cliCommand);
+    saveAcpConfig(config);
+
+    const resolved = resolveInitialCommand(acpCommand, acpArgs);
+    await startAgent(resolved.command, resolved.args, resolved.profileName);
     return;
   }
 
@@ -88,7 +200,15 @@ async function main() {
   npx weixin-acp logout                         退出登录
   npx weixin-acp claude-code                     使用 Claude Code
   npx weixin-acp codex                           使用 Codex
+  npx weixin-acp copilot                         使用 GitHub Copilot
+  npx weixin-acp codebuddy                       使用 Codebuddy
   npx weixin-acp start -- <command> [args...]    使用自定义 agent
+
+微信内命令:
+  /acp                                           查看 ACP 配置
+  /acp <name>                                    切换 ACP profile
+  /acp add <name> <command> [args...]            添加 profile
+  /acp rm <name>                                 删除 profile
 
 示例:
   npx weixin-acp start -- node ./my-agent.js`);

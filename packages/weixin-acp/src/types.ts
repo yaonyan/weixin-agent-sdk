@@ -1,3 +1,10 @@
+export type AcpProfile = {
+  /** Command to launch the ACP agent, e.g. "claude-agent-acp" */
+  command: string;
+  /** Command arguments, e.g. [] */
+  args?: string[];
+};
+
 export type AcpAgentOptions = {
   /** Command to launch the ACP agent, e.g. "npx" */
   command: string;

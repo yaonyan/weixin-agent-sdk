@@ -11,6 +11,8 @@ export interface Agent {
   chat(request: ChatRequest): Promise<ChatResponse>;
   /** Clear/reset the session for a given conversation. */
   clearSession?(conversationId: string): void;
+  /** Restart the underlying agent backend if supported. */
+  restart?(): Promise<void>;
 }
 
 export interface ChatRequest {
@@ -28,6 +30,8 @@ export interface ChatRequest {
     /** Original filename (available for file attachments). */
     fileName?: string;
   };
+  /** Called for live tool-call messages during verbose execution. */
+  onToolCall?: (message: string) => Promise<void>;
 }
 
 export interface ChatResponse {

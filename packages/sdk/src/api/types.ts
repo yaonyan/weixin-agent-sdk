@@ -42,6 +42,8 @@ export interface GetUploadUrlReq {
 export interface GetUploadUrlResp {
   /** 原图上传加密参数 */
   upload_param?: string;
+  /** 新版接口可能直接返回完整上传 URL */
+  upload_full_url?: string;
   /** 缩略图上传加密参数，无缩略图时为空 */
   thumb_upload_param?: string;
   /** 完整上传 URL（服务端直接返回，无需客户端拼接） */

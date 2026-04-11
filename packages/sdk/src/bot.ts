@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { Agent, ChatResponse } from "./agent/interface.js";
+import type { ProcessMessageDeps } from "./messaging/process-message.js";
 import {
   clearAllWeixinAccounts,
   DEFAULT_BASE_URL,
@@ -40,6 +41,8 @@ export type StartOptions = {
   abortSignal?: AbortSignal;
   /** Log callback (defaults to console.log). */
   log?: (msg: string) => void;
+  /** ACP profile management callbacks (optional, for ACP-aware agents). */
+  acp?: ProcessMessageDeps["acp"];
 };
 
 /**
@@ -268,6 +271,7 @@ export async function start(agent: Agent, opts?: StartOptions): Promise<Bot> {
     agent,
     abortSignal: opts?.abortSignal,
     log,
+    acp: opts?.acp,
   });
 
   return bot;

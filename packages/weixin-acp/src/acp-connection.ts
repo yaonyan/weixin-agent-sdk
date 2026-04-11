@@ -67,10 +67,12 @@ export class AcpConnection {
 
     proc.on("exit", (code) => {
       log(`subprocess exited (code=${code})`);
-      this.ready = false;
-      this.connection = null;
-      this.process = null;
-      this.onExit?.();
+      if (this.process === proc) {
+        this.ready = false;
+        this.connection = null;
+        this.process = null;
+        this.onExit?.();
+      }
     });
 
     const writable = Writable.toWeb(proc.stdin!) as WritableStream<Uint8Array>;
@@ -97,7 +99,7 @@ export class AcpConnection {
         }
         const collector = this.collectors.get(params.sessionId);
         if (collector) {
-          collector.handleUpdate(params);
+          await collector.handleUpdate(params);
         }
       },
       requestPermission: async (params) => {
@@ -125,6 +127,14 @@ export class AcpConnection {
     this.connection = conn;
     this.ready = true;
     return conn;
+  }
+
+  /**
+   * Restart the subprocess and reinitialize the ACP connection.
+   */
+  async restart(): Promise<void> {
+    this.dispose();
+    await this.ensureReady();
   }
 
   /**

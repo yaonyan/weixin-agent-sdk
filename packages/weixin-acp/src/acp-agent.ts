@@ -18,9 +18,11 @@ export class AcpAgent implements Agent {
   private connection: AcpConnection;
   private sessions = new Map<string, SessionId>();
   private options: AcpAgentOptions;
+  private currentProfileName?: string;
 
-  constructor(options: AcpAgentOptions) {
+  constructor(options: AcpAgentOptions, profileName?: string) {
     this.options = options;
+    this.currentProfileName = profileName;
     this.connection = new AcpConnection(options, () => {
       log("subprocess exited, clearing session cache");
       this.sessions.clear();
@@ -43,7 +45,7 @@ export class AcpAgent implements Agent {
     const preview = request.text?.slice(0, 50) || (request.media ? `[${request.media.type}]` : "");
     log(`prompt: "${preview}" (session=${sessionId})`);
 
-    const collector = new ResponseCollector();
+    const collector = new ResponseCollector(request.onToolCall);
     this.connection.registerCollector(sessionId, collector);
     try {
       await conn.prompt({ sessionId, prompt: blocks });
@@ -74,6 +76,28 @@ export class AcpAgent implements Agent {
   }
 
   /**
+   * Switch to a different ACP agent profile at runtime.
+   * Disposes the current subprocess and connection; the next chat() call
+   * will lazily start a new subprocess with the given options.
+   */
+  async switchProfile(name: string, options: AcpAgentOptions): Promise<void> {
+    log(`switching profile: ${this.currentProfileName ?? "(none)"} → ${name}`);
+    this.connection.dispose();
+    this.sessions.clear();
+    this.options = options;
+    this.currentProfileName = name;
+    this.connection = new AcpConnection(options, () => {
+      log("subprocess exited, clearing session cache");
+      this.sessions.clear();
+    });
+  }
+
+  /** Get the name of the currently active profile. */
+  get profileName(): string | undefined {
+    return this.currentProfileName;
+  }
+
+  /**
    * Clear/reset the session for a given conversation.
    * The next message will automatically create a fresh session.
    */
@@ -84,6 +108,15 @@ export class AcpAgent implements Agent {
       this.connection.unregisterCollector(sessionId);
       this.sessions.delete(conversationId);
     }
+  }
+
+  /**
+   * Restart the ACP subprocess and clear all cached sessions.
+   */
+  async restart(): Promise<void> {
+    log("restarting ACP subprocess");
+    this.sessions.clear();
+    await this.connection.restart();
   }
 
   /**

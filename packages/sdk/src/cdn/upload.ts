@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { getUploadUrl } from "../api/api.js";
+import type { GetUploadUrlResp } from "../api/types.js";
 import type { WeixinApiOptions } from "../api/api.js";
 import { aesEcbPaddedSize } from "./aes-ecb.js";
 import { uploadBufferToCdn } from "./cdn-upload.js";
@@ -49,6 +50,23 @@ export async function downloadRemoteImageToTemp(url: string, destDir: string): P
 /**
  * Common upload pipeline: read file → hash → gen aeskey → getUploadUrl → uploadBufferToCdn → return info.
  */
+function getUploadParam(uploadUrlResp: GetUploadUrlResp): string | undefined {
+  if (uploadUrlResp.upload_param) {
+    return uploadUrlResp.upload_param;
+  }
+
+  if (!uploadUrlResp.upload_full_url) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(uploadUrlResp.upload_full_url);
+    return url.searchParams.get("encrypted_query_param") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function uploadMediaToCdn(params: {
   filePath: string;
   toUserId: string;
@@ -83,12 +101,12 @@ async function uploadMediaToCdn(params: {
   });
 
   const uploadFullUrl = uploadUrlResp.upload_full_url?.trim();
-  const uploadParam = uploadUrlResp.upload_param;
+  const uploadParam = getUploadParam(uploadUrlResp);
   if (!uploadFullUrl && !uploadParam) {
     logger.error(
-      `${label}: getUploadUrl returned no upload URL (need upload_full_url or upload_param), resp=${JSON.stringify(uploadUrlResp)}`,
+      `${label}: getUploadUrl returned no upload_param/upload_full_url, resp=${JSON.stringify(uploadUrlResp)}`,
     );
-    throw new Error(`${label}: getUploadUrl returned no upload URL`);
+    throw new Error(`${label}: getUploadUrl returned no upload_param/upload_full_url`);
   }
 
   const { downloadParam: downloadEncryptedQueryParam } = await uploadBufferToCdn({
