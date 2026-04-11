@@ -8,8 +8,9 @@ import type { SessionNotification } from "@agentclientprotocol/sdk";
 
 const ACP_MEDIA_OUT_DIR = path.join(os.tmpdir(), "weixin-agent/media/acp-out");
 const TOOL_CALL_INPUT_LIMIT = 120;
+const NESTED_VALUE_LIMIT = 48;
 const OBJECT_ENTRY_LIMIT = 8;
-const ARRAY_ITEM_LIMIT = 5;
+const ARRAY_ITEM_LIMIT = 4;
 
 /** Parse rawInput into a JS value if possible. */
 function parseRawInput(rawInput: unknown): unknown {
@@ -38,27 +39,31 @@ function truncateValue(text: string, limit: number): string {
   return `${singleLine.slice(0, limit)}…`;
 }
 
-function summarizeValue(value: unknown): string {
+function summarizeValue(value: unknown, limit = TOOL_CALL_INPUT_LIMIT): string {
   if (value == null) return "(空)";
-  if (typeof value === "string") return truncateValue(value, TOOL_CALL_INPUT_LIMIT);
+  if (typeof value === "string") return truncateValue(value, limit);
   if (typeof value === "number" || typeof value === "boolean") return String(value);
 
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]";
-    const items = value.slice(0, ARRAY_ITEM_LIMIT).map((item) => summarizeValue(item));
+    const items = value
+      .slice(0, ARRAY_ITEM_LIMIT)
+      .map((item) => summarizeValue(item, NESTED_VALUE_LIMIT));
     const suffix = value.length > ARRAY_ITEM_LIMIT ? `, … 共${value.length}项` : "";
-    return `[${items.join(", ")}${suffix}]`;
+    return truncateValue(`[${items.join(", ")}${suffix}]`, limit);
   }
 
   if (typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     if (entries.length === 0) return "{}";
-    const parts = entries.slice(0, 3).map(([k, v]) => `${k}: ${summarizeValue(v)}`);
+    const parts = entries
+      .slice(0, 3)
+      .map(([k, v]) => `${k}: ${summarizeValue(v, NESTED_VALUE_LIMIT)}`);
     const suffix = entries.length > 3 ? ", …" : "";
-    return `{ ${parts.join(", ")}${suffix} }`;
+    return truncateValue(`{ ${parts.join(", ")}${suffix} }`, limit);
   }
 
-  return truncateValue(String(value), TOOL_CALL_INPUT_LIMIT);
+  return truncateValue(String(value), limit);
 }
 
 function formatToolParams(obj: Record<string, unknown>): string {
