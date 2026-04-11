@@ -34,7 +34,7 @@ async function findPid(): Promise<number | null> {
 
 async function killProcess(pid: number): Promise<void> {
   const cmd = new Deno.Command("taskkill", {
-    args: ["/F", "/PID", String(pid)],
+    args: ["/F", "/T", "/PID", String(pid)],
     stdout: "piped",
     stderr: "piped",
   });
