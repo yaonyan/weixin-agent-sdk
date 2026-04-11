@@ -12,6 +12,10 @@ const ENTRY_PATH =
   "c:\\Users\\bf_alexphzhou\\weixin-agent-sdk\\packages\\weixin-acp\\dist\\main.mjs";
 const NODE_PATH = "C:\\Program Files\\nodejs\\node.exe";
 
+function toPowerShellLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 interface AcpProfile {
   command: string;
   args?: string[];
@@ -101,17 +105,20 @@ async function killProcess(pid: number): Promise<void> {
 
 async function startProcess(): Promise<void> {
   const { args, env, profileName } = resolveProfile();
+  const workingDirectory = Deno.cwd();
   console.log(`Starting with profile: ${profileName}`);
+  console.log(`  cwd: ${workingDirectory}`);
   console.log(`  args: ${args.join(" ")}`);
   if (env) console.log(`  env: ${JSON.stringify(env)}`);
 
-  const argsEscaped = args.map((a) => `'${a.replace(/'/g, "''")}'`).join(",");
+  const argsEscaped = args.map(toPowerShellLiteral).join(",");
+  const workingDirectoryEscaped = toPowerShellLiteral(workingDirectory);
 
   // Build env var setup if profile has env
   let envSetup = "";
   if (env && Object.keys(env).length > 0) {
     const envEntries = Object.entries(env)
-      .map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}';`)
+      .map(([k, v]) => `$env:${k}=${toPowerShellLiteral(v)};`)
       .join("");
     envSetup = envEntries;
   }
@@ -120,7 +127,7 @@ async function startProcess(): Promise<void> {
     args: [
       "-NoProfile",
       "-Command",
-      `${envSetup}Start-Process -FilePath '${NODE_PATH}' -ArgumentList ${argsEscaped}`,
+      `${envSetup}Start-Process -FilePath ${toPowerShellLiteral(NODE_PATH)} -WorkingDirectory ${workingDirectoryEscaped} -ArgumentList ${argsEscaped}`,
     ],
     stdout: "piped",
     stderr: "piped",

@@ -23,10 +23,7 @@ export class AcpAgent implements Agent {
   constructor(options: AcpAgentOptions, profileName?: string) {
     this.options = options;
     this.currentProfileName = profileName;
-    this.connection = new AcpConnection(options, () => {
-      log("subprocess exited, clearing session cache");
-      this.sessions.clear();
-    });
+    this.connection = this.createConnection(options);
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
@@ -90,7 +87,11 @@ export class AcpAgent implements Agent {
     this.sessions.clear();
     this.options = options;
     this.currentProfileName = name;
-    this.connection = new AcpConnection(options, () => {
+    this.connection = this.createConnection(options);
+  }
+
+  private createConnection(options: AcpAgentOptions): AcpConnection {
+    return new AcpConnection(options, () => {
       log("subprocess exited, clearing session cache");
       this.sessions.clear();
     });

@@ -33,10 +33,23 @@ const BUILTIN_AGENTS: Record<string, { command: string; args?: string[]; env?: R
   "claude-code": { command: "claude-agent-acp" },
   codex: { command: "codex-acp" },
   copilot: { command: "copilot", args: ["--acp"] },
-  codebuddy: { command: "cmd", args: ["/c", "codebuddy.cmd", "--acp"], env: { CODEBUDDY_DEFER_TOOL_LOADING: "false" } },
+  codebuddy: {
+    command: "cmd",
+    args: ["/c", "codebuddy.cmd", "--acp"],
+    env: { CODEBUDDY_DEFER_TOOL_LOADING: "false" },
+  },
 };
 
 const cliCommand = process.argv[2];
+
+function createAgentOptions(
+  command: string,
+  args: string[] | undefined,
+  env: Record<string, string> | undefined,
+  cwd: string,
+): AcpAgentOptions {
+  return { command, args, env, cwd };
+}
 
 async function ensureLoggedIn() {
   if (!isLoggedIn()) {
@@ -48,8 +61,8 @@ async function ensureLoggedIn() {
 async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string, acpEnv?: Record<string, string>) {
   await ensureLoggedIn();
 
-  const agentOptions: AcpAgentOptions = { command: acpCommand, args: acpArgs, env: acpEnv };
-  const agent = new AcpAgent(agentOptions, profileName);
+  const cwd = process.cwd();
+  const agent = new AcpAgent(createAgentOptions(acpCommand, acpArgs, acpEnv, cwd), profileName);
 
   const ac = new AbortController();
   process.on("SIGINT", () => {
@@ -77,8 +90,10 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       const config = loadAcpConfig();
       const profile = config.profiles[name];
       if (!profile) return undefined;
-      const newOptions: AcpAgentOptions = { command: profile.command, args: profile.args, env: profile.env };
-      await agent.switchProfile(name, newOptions);
+      await agent.switchProfile(
+        name,
+        createAgentOptions(profile.command, profile.args, profile.env, cwd),
+      );
       setActiveProfile(config, name);
       saveAcpConfig(config);
       return name;
@@ -101,12 +116,10 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       const defaultName = config.defaultProfile;
       const defaultProfile = getDefaultProfile(config);
       if (defaultName && defaultProfile) {
-        const newOptions: AcpAgentOptions = {
-          command: defaultProfile.command,
-          args: defaultProfile.args,
-          env: defaultProfile.env,
-        };
-        await agent.switchProfile(defaultName, newOptions);
+        await agent.switchProfile(
+          defaultName,
+          createAgentOptions(defaultProfile.command, defaultProfile.args, defaultProfile.env, cwd),
+        );
         setActiveProfile(config, defaultName);
         saveAcpConfig(config);
       }
