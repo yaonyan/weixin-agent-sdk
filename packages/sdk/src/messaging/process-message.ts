@@ -16,7 +16,7 @@ import { setContextToken, bodyFromItemList, isMediaItem } from "./inbound.js";
 import { sendWeixinErrorNotice } from "./error-notice.js";
 import { sendWeixinMediaFile } from "./send-media.js";
 import { markdownToPlainText, sendMessageWeixin } from "./send.js";
-import { handleSlashCommand } from "./slash-commands.js";
+import { handleSlashCommand, type McpServerDef } from "./slash-commands.js";
 import { isVerboseMode } from "./verbose-mode.js";
 
 const MEDIA_TEMP_DIR = path.join(os.tmpdir(), "weixin-agent/media");
@@ -163,7 +163,7 @@ export type ProcessMessageDeps = {
     defaultProfileName?: string;
     profileNames?: string[];
     onSwitch?: (profileName: string) => Promise<string | undefined>;
-    onAdd?: (name: string, command: string, args: string[], env?: Record<string, string>) => Promise<string | undefined>;
+    onAdd?: (name: string, command: string, args: string[], env?: Record<string, string>, mcpServers?: McpServerDef[]) => Promise<string | undefined>;
     onRm?: (name: string) => Promise<string | undefined>;
     onRestart?: () => Promise<void>;
   };

@@ -1,3 +1,5 @@
+import type { McpServer } from "@agentclientprotocol/sdk";
+
 export type AcpProfile = {
   /** Command to launch the ACP agent, e.g. "claude-agent-acp" */
   command: string;
@@ -5,6 +7,8 @@ export type AcpProfile = {
   args?: string[];
   /** Extra environment variables for the subprocess */
   env?: Record<string, string>;
+  /** MCP servers to pass to the ACP agent on session creation */
+  mcpServers?: McpServer[];
 };
 
 export type AcpAgentOptions = {
@@ -18,4 +22,6 @@ export type AcpAgentOptions = {
   cwd?: string;
   /** Prompt timeout in milliseconds (default: 120_000) */
   promptTimeoutMs?: number;
+  /** MCP servers to pass to the ACP agent on session creation */
+  mcpServers?: McpServer[];
 };

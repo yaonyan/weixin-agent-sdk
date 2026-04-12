@@ -69,7 +69,7 @@ export class AcpAgent implements Agent {
     log(`creating new session for conversation=${conversationId}`);
     const res = await conn.newSession({
       cwd: this.options.cwd ?? process.cwd(),
-      mcpServers: [],
+      mcpServers: this.options.mcpServers ?? [],
     });
     log(`session created: ${res.sessionId}, cwd: ${this.options.cwd ?? process.cwd()}`);
     this.sessions.set(conversationId, res.sessionId);

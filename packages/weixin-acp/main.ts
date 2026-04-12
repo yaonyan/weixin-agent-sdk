@@ -14,6 +14,7 @@
  */
 
 import { isLoggedIn, login, logout, start } from "weixin-agent-sdk";
+import type { McpServer } from "@agentclientprotocol/sdk";
 
 import { AcpAgent } from "./src/acp-agent.js";
 import {
@@ -29,7 +30,7 @@ import {
 import type { AcpAgentOptions } from "./src/types.js";
 
 /** Built-in agent shortcuts */
-const BUILTIN_AGENTS: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {
+const BUILTIN_AGENTS: Record<string, { command: string; args?: string[]; env?: Record<string, string>; mcpServers?: McpServer[] }> = {
   "claude-code": { command: "claude-agent-acp" },
   codex: { command: "codex-acp" },
   copilot: { command: "copilot", args: ["--acp"] },
@@ -37,6 +38,9 @@ const BUILTIN_AGENTS: Record<string, { command: string; args?: string[]; env?: R
     command: "cmd",
     args: ["/c", "codebuddy.cmd", "--acp"],
     env: { CODEBUDDY_DEFER_TOOL_LOADING: "false" },
+    mcpServers: [
+      { type: "sse", name: "mcpc", url: "http://127.0.0.1:3000/sse", headers: [] },
+    ],
   },
 };
 
@@ -47,8 +51,9 @@ function createAgentOptions(
   args: string[] | undefined,
   env: Record<string, string> | undefined,
   cwd: string,
+  mcpServers?: McpServer[],
 ): AcpAgentOptions {
-  return { command, args, env, cwd };
+  return { command, args, env, cwd, mcpServers };
 }
 
 async function ensureLoggedIn() {
@@ -58,11 +63,11 @@ async function ensureLoggedIn() {
   }
 }
 
-async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string, acpEnv?: Record<string, string>) {
+async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string, acpEnv?: Record<string, string>, acpMcpServers?: McpServer[]) {
   await ensureLoggedIn();
 
   const cwd = process.cwd();
-  const agent = new AcpAgent(createAgentOptions(acpCommand, acpArgs, acpEnv, cwd), profileName);
+  const agent = new AcpAgent(createAgentOptions(acpCommand, acpArgs, acpEnv, cwd, acpMcpServers), profileName);
 
   const ac = new AbortController();
   process.on("SIGINT", () => {
@@ -92,15 +97,15 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       if (!profile) return undefined;
       await agent.switchProfile(
         name,
-        createAgentOptions(profile.command, profile.args, profile.env, cwd),
+        createAgentOptions(profile.command, profile.args, profile.env, cwd, profile.mcpServers),
       );
       setActiveProfile(config, name);
       saveAcpConfig(config);
       return name;
     },
-    onAdd: async (name: string, cmd: string, args: string[], env?: Record<string, string>): Promise<string | undefined> => {
+    onAdd: async (name: string, cmd: string, args: string[], env?: Record<string, string>, mcpServers?: McpServer[]): Promise<string | undefined> => {
       const config = loadAcpConfig();
-      addProfile(config, name, cmd, args, env);
+      addProfile(config, name, cmd, args, env, mcpServers);
       saveAcpConfig(config);
       return name;
     },
@@ -118,7 +123,7 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       if (defaultName && defaultProfile) {
         await agent.switchProfile(
           defaultName,
-          createAgentOptions(defaultProfile.command, defaultProfile.args, defaultProfile.env, cwd),
+          createAgentOptions(defaultProfile.command, defaultProfile.args, defaultProfile.env, cwd, defaultProfile.mcpServers),
         );
         setActiveProfile(config, defaultName);
         saveAcpConfig(config);
@@ -139,13 +144,14 @@ function resolveInitialCommand(cliCommand?: string, cliArgs?: string[]): {
   args: string[];
   profileName?: string;
   env?: Record<string, string>;
+  mcpServers?: McpServer[];
 } {
   // Try to use saved active profile
   const config = loadAcpConfig();
   const active = getActiveProfile(config);
   if (active) {
     console.log(`[acp] 使用已保存的 profile: ${config.activeProfile} (${active.command})`);
-    return { command: active.command, args: active.args ?? [], profileName: config.activeProfile, env: active.env };
+    return { command: active.command, args: active.args ?? [], profileName: config.activeProfile, env: active.env, mcpServers: active.mcpServers };
   }
 
   // Fall back to CLI args
@@ -190,21 +196,21 @@ async function main() {
     saveAcpConfig(config);
 
     const resolved = resolveInitialCommand(acpCommand, acpArgs);
-    await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env);
+    await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env, resolved.mcpServers);
     return;
   }
 
   if (cliCommand && cliCommand in BUILTIN_AGENTS) {
-    const { command: acpCommand, args: acpArgs, env: acpEnv } = BUILTIN_AGENTS[cliCommand];
+    const { command: acpCommand, args: acpArgs, env: acpEnv, mcpServers: acpMcpServers } = BUILTIN_AGENTS[cliCommand];
     // Auto-save as profile using the shortcut name
     const config = loadAcpConfig();
-    addProfile(config, cliCommand, acpCommand, acpArgs, acpEnv);
+    addProfile(config, cliCommand, acpCommand, acpArgs, acpEnv, acpMcpServers);
     setActiveProfile(config, cliCommand);
     setDefaultProfile(config, cliCommand);
     saveAcpConfig(config);
 
     const resolved = resolveInitialCommand(acpCommand, acpArgs);
-    await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env);
+    await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env, resolved.mcpServers);
     return;
   }
 

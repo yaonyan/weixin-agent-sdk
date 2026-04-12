@@ -24,6 +24,15 @@ export interface SlashCommandResult {
   handled: boolean;
 }
 
+/**
+ * Minimal MCP server definition matching the ACP protocol McpServer type.
+ * Kept inline to avoid coupling the SDK package to @agentclientprotocol/sdk.
+ */
+export type McpServerDef =
+  | { type: "http"; name: string; url: string; headers?: Array<{ name: string; value: string }> }
+  | { type: "sse"; name: string; url: string; headers?: Array<{ name: string; value: string }> }
+  | { type: "stdio"; name: string; command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
+
 export interface SlashCommandContext {
   to: string;
   contextToken?: string;
@@ -41,7 +50,7 @@ export interface SlashCommandContext {
   /** Called when /acp <name> is invoked to switch the ACP profile. Returns the new profile name on success. */
   onAcpSwitch?: (profileName: string) => Promise<string | undefined>;
   /** Called when /acp add <name> <command> [args...] is invoked. Returns the profile name on success. */
-  onAcpAdd?: (name: string, command: string, args: string[], env?: Record<string, string>) => Promise<string | undefined>;
+  onAcpAdd?: (name: string, command: string, args: string[], env?: Record<string, string>, mcpServers?: McpServerDef[]) => Promise<string | undefined>;
   /** Called when /acp rm <name> is invoked. Returns the removed profile name on success. */
   onAcpRm?: (name: string) => Promise<string | undefined>;
   /** Get the current ACP profile name. */

@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { McpServer } from "@agentclientprotocol/sdk";
 import type { AcpProfile } from "./types.js";
 
 function resolveStateDir(): string {
@@ -45,8 +46,8 @@ export function saveAcpConfig(config: AcpConfig): void {
   fs.writeFileSync(filePath, JSON.stringify(config, null, 2), "utf-8");
 }
 
-export function addProfile(config: AcpConfig, name: string, command: string, args?: string[], env?: Record<string, string>): void {
-  config.profiles[name] = { command, args: args?.length ? args : undefined, env: env && Object.keys(env).length > 0 ? env : undefined };
+export function addProfile(config: AcpConfig, name: string, command: string, args?: string[], env?: Record<string, string>, mcpServers?: McpServer[]): void {
+  config.profiles[name] = { command, args: args?.length ? args : undefined, env: env && Object.keys(env).length > 0 ? env : undefined, mcpServers: mcpServers?.length ? mcpServers : undefined };
 }
 
 export function removeProfile(config: AcpConfig, name: string): boolean {
