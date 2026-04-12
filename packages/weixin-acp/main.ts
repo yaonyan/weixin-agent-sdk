@@ -146,15 +146,32 @@ function resolveInitialCommand(cliCommand?: string, cliArgs?: string[]): {
   env?: Record<string, string>;
   mcpServers?: McpServer[];
 } {
-  // Try to use saved active profile
   const config = loadAcpConfig();
+
   const active = getActiveProfile(config);
-  if (active) {
+  if (active && config.activeProfile) {
     console.log(`[acp] 使用已保存的 profile: ${config.activeProfile} (${active.command})`);
-    return { command: active.command, args: active.args ?? [], profileName: config.activeProfile, env: active.env, mcpServers: active.mcpServers };
+    return {
+      command: active.command,
+      args: active.args ?? [],
+      profileName: config.activeProfile,
+      env: active.env,
+      mcpServers: active.mcpServers,
+    };
   }
 
-  // Fall back to CLI args
+  const defaultProfile = getDefaultProfile(config);
+  if (defaultProfile && config.defaultProfile) {
+    console.log(`[acp] 使用默认 profile: ${config.defaultProfile} (${defaultProfile.command})`);
+    return {
+      command: defaultProfile.command,
+      args: defaultProfile.args ?? [],
+      profileName: config.defaultProfile,
+      env: defaultProfile.env,
+      mcpServers: defaultProfile.mcpServers,
+    };
+  }
+
   return { command: cliCommand ?? "", args: cliArgs ?? [] };
 }
 
@@ -212,6 +229,14 @@ async function main() {
     const resolved = resolveInitialCommand(acpCommand, acpArgs);
     await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env, resolved.mcpServers);
     return;
+  }
+
+  if (!cliCommand) {
+    const resolved = resolveInitialCommand();
+    if (resolved.command) {
+      await startAgent(resolved.command, resolved.args, resolved.profileName, resolved.env, resolved.mcpServers);
+      return;
+    }
   }
 
   console.log(`weixin-acp — 微信 + ACP 适配器

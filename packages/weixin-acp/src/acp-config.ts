@@ -12,11 +12,13 @@ import type { McpServer } from "@agentclientprotocol/sdk";
 import type { AcpProfile } from "./types.js";
 
 function resolveStateDir(): string {
-  return (
-    process.env.WEIXIN_ACP_STATE_DIR?.trim() ||
-    process.env.XDG_CONFIG_HOME?.trim() ||
-    path.join(os.homedir(), ".config", "weixin-acp")
-  );
+  const custom = process.env.WEIXIN_ACP_STATE_DIR?.trim();
+  if (custom) return custom;
+
+  const xdg = process.env.XDG_CONFIG_HOME?.trim();
+  if (xdg) return path.join(xdg, "weixin-acp");
+
+  return path.join(os.homedir(), ".config", "weixin-acp");
 }
 
 export interface AcpConfig {

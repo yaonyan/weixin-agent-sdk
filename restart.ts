@@ -1,153 +1,222 @@
+// @ts-nocheck — This file is meant to run with Deno, not Node.js tsc.
 // restart.ts — Kill the running weixin-acp node process and immediately restart it.
-// Reads the ACP profile config (~/.openclaw/acp-profiles.json) to determine
-// which agent to launch, including env vars.
-// Usage: deno run --allow-run --allow-sys --allow-read --allow-env restart.ts
+// The ACP profile config is read by the package itself
+// from ~/.config/weixin-acp/acp-profiles.json (or WEIXIN_ACP_STATE_DIR).
+//
+// Prerequisites:
+//   1. pnpm install
+//   2. pnpm --filter weixin-agent-sdk run build
+//   3. pnpm --filter weixin-acp run build
+//   4. pnpm --filter weixin-acp run login   (scan QR code to sign in)
+//
+// Usage:   deno run -A restart.ts
+// Supports: Windows (PowerShell) · macOS · Linux
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 const PROCESS_MATCH = "weixin-agent-sdk";
-const ENTRY_PATH =
-  "c:\\Users\\bf_alexphzhou\\weixin-agent-sdk\\packages\\weixin-acp\\dist\\main.mjs";
-const NODE_PATH = "C:\\Program Files\\nodejs\\node.exe";
-
-function toPowerShellLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-interface AcpProfile {
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
-}
-
-interface AcpConfig {
-  profiles: Record<string, AcpProfile>;
-  activeProfile?: string;
-  defaultProfile?: string;
-}
+const isWindows = Deno.build.os === "windows";
+const ENTRY_PATH = join(
+  Deno.cwd(),
+  "packages",
+  "weixin-acp",
+  "dist",
+  "main.mjs",
+);
+const NODE_PATH = isWindows
+  ? join(
+    Deno.env.get("ProgramFiles") ?? "C:\\Program Files",
+    "nodejs",
+    "node.exe",
+  )
+  : "node";
 
 function resolveStateDir(): string {
-  return (
-    Deno.env.get("OPENCLAW_STATE_DIR")?.trim() ||
-    Deno.env.get("CLAWDBOT_STATE_DIR")?.trim() ||
-    join(homedir(), ".openclaw")
-  );
+  const custom = Deno.env.get("WEIXIN_ACP_STATE_DIR")?.trim();
+  if (custom) return custom;
+
+  const xdg = Deno.env.get("XDG_CONFIG_HOME")?.trim();
+  if (xdg) return join(xdg, "weixin-acp");
+
+  return join(homedir(), ".config", "weixin-acp");
 }
 
-function loadAcpConfig(): AcpConfig {
-  const configPath = join(resolveStateDir(), "acp-profiles.json");
-  if (!existsSync(configPath)) return { profiles: {} };
-  try {
-    const raw = readFileSync(configPath, "utf-8");
-    const parsed = JSON.parse(raw) as AcpConfig;
-    if (parsed && typeof parsed.profiles === "object") return parsed;
-  } catch {
-    // corrupt — start fresh
+const STATE_DIR = resolveStateDir();
+const STDOUT_LOG_PATH = join(STATE_DIR, "weixin-acp.out.log");
+const STDERR_LOG_PATH = join(STATE_DIR, "weixin-acp.err.log");
+
+function toShellLiteral(value: string): string {
+  if (isWindows) return `'${value.replace(/'/g, "''")}'`;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function findPids(): Promise<number[]> {
+  if (isWindows) {
+    const cmd = new Deno.Command("powershell", {
+      args: [
+        "-NoProfile",
+        "-Command",
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${ENTRY_PATH_PATTERN}*' -and $_.Name -eq 'node.exe' } | Select-Object -ExpandProperty ProcessId`,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { stdout } = await cmd.output();
+    const text = new TextDecoder().decode(stdout).trim();
+    if (!text) return [];
+    return text
+      .split("\n")
+      .map((line) => parseInt(line.trim(), 10))
+      .filter((pid) => !Number.isNaN(pid));
   }
-  return { profiles: {} };
-}
 
-/** Resolve the ACP command + args + env from the profile config. */
-function resolveProfile(): {
-  args: string[];
-  env?: Record<string, string>;
-  profileName: string;
-} {
-  const config = loadAcpConfig();
-
-  // Prefer activeProfile, fall back to defaultProfile
-  const profileName = config.activeProfile || config.defaultProfile;
-  if (profileName) {
-    const profile = config.profiles[profileName];
-    if (profile) {
-      return {
-        args: [ENTRY_PATH, "start", "--", profile.command, ...(profile.args ?? [])],
-        env: profile.env,
-        profileName,
-      };
-    }
-  }
-
-  // Fallback: use the "codebuddy" shortcut
-  return {
-    args: [ENTRY_PATH, "codebuddy"],
-    profileName: "codebuddy (fallback)",
-  };
-}
-
-async function findPid(): Promise<number | null> {
-  const cmd = new Deno.Command("powershell", {
-    args: [
-      "-NoProfile",
-      "-Command",
-      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${PROCESS_MATCH}*packages\\weixin-acp\\dist\\main.mjs*' -and $_.Name -eq 'node.exe' } | Select-Object -ExpandProperty ProcessId`,
-    ],
+  const cmd = new Deno.Command("pgrep", {
+    args: ["-f", `${PROCESS_MATCH}.*weixin-acp/dist/main.mjs`],
     stdout: "piped",
     stderr: "piped",
   });
-  const { stdout } = await cmd.output();
+  const { stdout, code } = await cmd.output();
+  if (code !== 0) return [];
   const text = new TextDecoder().decode(stdout).trim();
-  if (!text) return null;
-  const pid = parseInt(text.split("\n")[0].trim(), 10);
-  return Number.isNaN(pid) ? null : pid;
+  if (!text) return [];
+  return text
+    .split("\n")
+    .map((line) => parseInt(line.trim(), 10))
+    .filter((pid) => !Number.isNaN(pid));
 }
 
-async function killProcess(pid: number): Promise<void> {
-  const cmd = new Deno.Command("taskkill", {
-    args: ["/F", "/T", "/PID", String(pid)],
+async function killProcesses(pids: number[]): Promise<void> {
+  if (pids.length === 0) return;
+
+  if (isWindows) {
+    for (const pid of pids) {
+      const cmd = new Deno.Command("taskkill", {
+        args: ["/F", "/T", "/PID", String(pid)],
+        stdout: "piped",
+        stderr: "piped",
+      });
+      await cmd.output();
+    }
+    return;
+  }
+
+  const cmd = new Deno.Command("kill", {
+    args: pids.map(String),
     stdout: "piped",
     stderr: "piped",
   });
   await cmd.output();
 }
 
-async function startProcess(): Promise<void> {
-  const { args, env, profileName } = resolveProfile();
+async function startProcess(): Promise<number | null> {
   const workingDirectory = Deno.cwd();
-  console.log(`Starting with profile: ${profileName}`);
+  mkdirSync(STATE_DIR, { recursive: true });
+
+  console.log("Starting weixin-acp");
   console.log(`  cwd: ${workingDirectory}`);
-  console.log(`  args: ${args.join(" ")}`);
-  if (env) console.log(`  env: ${JSON.stringify(env)}`);
+  console.log(`  entry: ${ENTRY_PATH}`);
+  console.log(`  stdout log: ${STDOUT_LOG_PATH}`);
+  console.log(`  stderr log: ${STDERR_LOG_PATH}`);
 
-  const argsEscaped = args.map(toPowerShellLiteral).join(",");
-  const workingDirectoryEscaped = toPowerShellLiteral(workingDirectory);
+  if (isWindows) {
+    const argsEscaped = [ENTRY_PATH].map(toShellLiteral).join(",");
+    const workingDirectoryEscaped = toShellLiteral(workingDirectory);
+    const stdoutLogEscaped = toShellLiteral(STDOUT_LOG_PATH);
+    const stderrLogEscaped = toShellLiteral(STDERR_LOG_PATH);
 
-  // Build env var setup if profile has env
-  let envSetup = "";
-  if (env && Object.keys(env).length > 0) {
-    const envEntries = Object.entries(env)
-      .map(([k, v]) => `$env:${k}=${toPowerShellLiteral(v)};`)
-      .join("");
-    envSetup = envEntries;
+    const ps = new Deno.Command("powershell", {
+      args: [
+        "-NoProfile",
+        "-Command",
+        `$p = Start-Process -FilePath ${
+          toShellLiteral(NODE_PATH)
+        } -WorkingDirectory ${workingDirectoryEscaped} -ArgumentList ${argsEscaped} -RedirectStandardOutput ${stdoutLogEscaped} -RedirectStandardError ${stderrLogEscaped} -PassThru; $p.Id`,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { stdout, stderr } = await ps.output();
+    const err = new TextDecoder().decode(stderr).trim();
+    if (err) console.error(err);
+
+    const text = new TextDecoder().decode(stdout).trim();
+    if (!text) return null;
+    const pid = parseInt(text.split("\n")[0].trim(), 10);
+    return Number.isNaN(pid) ? null : pid;
   }
 
-  const ps = new Deno.Command("powershell", {
-    args: [
-      "-NoProfile",
-      "-Command",
-      `${envSetup}Start-Process -FilePath ${toPowerShellLiteral(NODE_PATH)} -WorkingDirectory ${workingDirectoryEscaped} -ArgumentList ${argsEscaped}`,
-    ],
-    stdout: "piped",
-    stderr: "piped",
+  const stdoutFile = Deno.openSync(STDOUT_LOG_PATH, {
+    create: true,
+    write: true,
+    append: true,
   });
-  const { stderr } = await ps.output();
-  const err = new TextDecoder().decode(stderr).trim();
-  if (err) console.error(err);
+  const stderrFile = Deno.openSync(STDERR_LOG_PATH, {
+    create: true,
+    write: true,
+    append: true,
+  });
+
+  try {
+    const child = new Deno.Command(NODE_PATH, {
+      args: [ENTRY_PATH],
+      cwd: workingDirectory,
+      stdin: "null",
+      stdout: stdoutFile.rid,
+      stderr: stderrFile.rid,
+    }).spawn();
+    const pid = child.pid;
+    child.unref();
+    return pid ?? null;
+  } finally {
+    stdoutFile.close();
+    stderrFile.close();
+  }
+}
+
+async function waitForStartup(expectedPid: number | null): Promise<number[]> {
+  for (let i = 0; i < 6; i++) {
+    await sleep(500);
+    const pids = await findPids();
+    if (expectedPid !== null) {
+      if (pids.includes(expectedPid)) return pids;
+    } else if (pids.length > 0) {
+      return pids;
+    }
+  }
+  return [];
 }
 
 async function main() {
-  const pid = await findPid();
-  if (pid !== null) {
-    await killProcess(pid);
-    console.log(`Killed PID ${pid}`);
-    await new Promise((r) => setTimeout(r, 2000));
+  const existingPids = await findPids();
+  if (existingPids.length > 0) {
+    await killProcesses(existingPids);
+    console.log(`Killed PIDs ${existingPids.join(", ")}`);
+    await sleep(2000);
   } else {
     console.log("No existing weixin-acp process");
   }
-  await startProcess();
-  console.log("Started weixin-acp");
+
+  const startedPid = await startProcess();
+  const runningPids = await waitForStartup(startedPid);
+
+  if (runningPids.length > 0) {
+    console.log(
+      `Started weixin-acp${startedPid !== null ? ` (pid ${startedPid})` : ""}`,
+    );
+    console.log(`  running pids: ${runningPids.join(", ")}`);
+    return;
+  }
+
+  console.error("weixin-acp may have exited immediately; check logs:");
+  console.error(`  stdout: ${STDOUT_LOG_PATH}`);
+  console.error(`  stderr: ${STDERR_LOG_PATH}`);
+  Deno.exit(1);
 }
 
 main();
