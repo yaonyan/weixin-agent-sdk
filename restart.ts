@@ -12,14 +12,16 @@
 // Usage:   deno run -A restart.ts
 // Supports: Windows (PowerShell) · macOS · Linux
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROCESS_MATCH = "weixin-agent-sdk";
 const isWindows = Deno.build.os === "windows";
 const ENTRY_PATH = join(
-  Deno.cwd(),
+  __dirname,
   "packages",
   "weixin-acp",
   "dist",
@@ -62,7 +64,7 @@ async function findPids(): Promise<number[]> {
       args: [
         "-NoProfile",
         "-Command",
-        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${ENTRY_PATH_PATTERN}*' -and $_.Name -eq 'node.exe' } | Select-Object -ExpandProperty ProcessId`,
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*weixin-acp*' -and $_.Name -eq 'node.exe' } | Select-Object -ExpandProperty ProcessId`,
       ],
       stdout: "piped",
       stderr: "piped",
@@ -115,7 +117,7 @@ async function killProcesses(pids: number[]): Promise<void> {
 }
 
 async function startProcess(): Promise<number | null> {
-  const workingDirectory = Deno.cwd();
+  const workingDirectory = __dirname;
   mkdirSync(STATE_DIR, { recursive: true });
 
   console.log("Starting weixin-acp");
@@ -125,30 +127,18 @@ async function startProcess(): Promise<number | null> {
   console.log(`  stderr log: ${STDERR_LOG_PATH}`);
 
   if (isWindows) {
-    const argsEscaped = [ENTRY_PATH].map(toShellLiteral).join(",");
-    const workingDirectoryEscaped = toShellLiteral(workingDirectory);
-    const stdoutLogEscaped = toShellLiteral(STDOUT_LOG_PATH);
-    const stderrLogEscaped = toShellLiteral(STDERR_LOG_PATH);
-
-    const ps = new Deno.Command("powershell", {
-      args: [
-        "-NoProfile",
-        "-Command",
-        `$p = Start-Process -FilePath ${
-          toShellLiteral(NODE_PATH)
-        } -WorkingDirectory ${workingDirectoryEscaped} -ArgumentList ${argsEscaped} -RedirectStandardOutput ${stdoutLogEscaped} -RedirectStandardError ${stderrLogEscaped} -PassThru; $p.Id`,
-      ],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout, stderr } = await ps.output();
-    const err = new TextDecoder().decode(stderr).trim();
-    if (err) console.error(err);
-
-    const text = new TextDecoder().decode(stdout).trim();
-    if (!text) return null;
-    const pid = parseInt(text.split("\n")[0].trim(), 10);
-    return Number.isNaN(pid) ? null : pid;
+    // Open log files and spawn node directly — no shell intermediary needed
+    const stdoutFd = openSync(STDOUT_LOG_PATH, "a");
+    const stderrFd = openSync(STDERR_LOG_PATH, "a");
+    const child = new Deno.Command(NODE_PATH, {
+      args: [ENTRY_PATH],
+      cwd: workingDirectory,
+      stdout: stdoutFd as unknown as "piped",
+      stderr: stderrFd as unknown as "piped",
+      stdin: "null",
+    }).spawn();
+    child.unref();
+    return child.pid ?? null;
   }
 
   const shellCommand = [
@@ -174,7 +164,7 @@ async function startProcess(): Promise<number | null> {
 }
 
 async function waitForStartup(expectedPid: number | null): Promise<number[]> {
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 12; i++) {
     await sleep(500);
     const pids = await findPids();
     if (expectedPid !== null) {
