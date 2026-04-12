@@ -12,7 +12,7 @@
 // Usage:   deno run -A restart.ts
 // Supports: Windows (PowerShell) · macOS · Linux
 
-import { existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,18 +127,34 @@ async function startProcess(): Promise<number | null> {
   console.log(`  stderr log: ${STDERR_LOG_PATH}`);
 
   if (isWindows) {
-    // Open log files and spawn node directly — no shell intermediary needed
-    const stdoutFd = openSync(STDOUT_LOG_PATH, "a");
-    const stderrFd = openSync(STDERR_LOG_PATH, "a");
-    const child = new Deno.Command(NODE_PATH, {
-      args: [ENTRY_PATH],
-      cwd: workingDirectory,
-      stdout: stdoutFd as unknown as "piped",
-      stderr: stderrFd as unknown as "piped",
-      stdin: "null",
-    }).spawn();
+    // Use PowerShell Start-Process to launch detached with file redirection.
+    // The -NoNewWindow flag prevents the popup console window.
+    // File handles are owned by the child process, not Deno, so they survive our exit.
+    const ps = new Deno.Command("powershell", {
+      args: [
+        "-NoProfile",
+        "-Command",
+        [
+          `$p = Start-Process -FilePath '${NODE_PATH.replace(/'/g, "''")}'`,
+          `-ArgumentList '${ENTRY_PATH.replace(/'/g, "''")}'`,
+          `-WorkingDirectory '${workingDirectory.replace(/'/g, "''")}'`,
+          `-RedirectStandardOutput '${STDOUT_LOG_PATH.replace(/'/g, "''")}'`,
+          `-RedirectStandardError '${STDERR_LOG_PATH.replace(/'/g, "''")}'`,
+          `-NoNewWindow -PassThru`,
+        ].join(" "),
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    // Start-Process with -RedirectStandardOutput + -NoNewWindow may block until
+    // the child exits.  Run it in the background so we can poll for the pid.
+    const child = ps.spawn();
     child.unref();
-    return child.pid ?? null;
+
+    // Give the node process a moment to appear, then find its pid via WMI.
+    await sleep(1500);
+    const pids = await findPids();
+    return pids.length > 0 ? pids[0] : null;
   }
 
   const shellCommand = [

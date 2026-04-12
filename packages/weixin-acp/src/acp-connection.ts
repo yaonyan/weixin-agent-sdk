@@ -36,6 +36,7 @@ export class AcpConnection {
   private process: ChildProcess | null = null;
   private connection: ClientSideConnection | null = null;
   private ready = false;
+  private initPromise: Promise<ClientSideConnection> | null = null;
   private collectors = new Map<SessionId, ResponseCollector>();
 
   private onExit?: () => void;
@@ -65,17 +66,32 @@ export class AcpConnection {
     if (this.ready && this.connection) {
       return this.connection;
     }
+    // Guard against concurrent initialization: reuse the in-flight promise.
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+    this.initPromise = this._doInit().finally(() => {
+      this.initPromise = null;
+    });
+    return this.initPromise;
+  }
 
+  private async _doInit(): Promise<ClientSideConnection> {
     const args = this.options.args ?? [];
     log(`profile env overrides: ${formatEnv(this.options.env)}`);
     log(`spawning: ${this.options.command} ${args.join(" ")} (cwd: ${this.options.cwd ?? process.cwd()})`);
 
     const proc = spawn(this.options.command, args, {
-      stdio: ["pipe", "pipe", "inherit"],
+      stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...this.options.env },
       cwd: this.options.cwd,
     });
     this.process = proc;
+
+    // Forward child stderr to our own stderr (non-fatal if it fails)
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      process.stderr.write(chunk);
+    });
 
     proc.on("exit", (code) => {
       log(`subprocess exited (code=${code})`);
@@ -175,6 +191,7 @@ export class AcpConnection {
    */
   dispose(): void {
     this.ready = false;
+    this.initPromise = null;
     this.collectors.clear();
     if (this.process) {
       this.process.kill();
