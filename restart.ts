@@ -151,32 +151,26 @@ async function startProcess(): Promise<number | null> {
     return Number.isNaN(pid) ? null : pid;
   }
 
-  const stdoutFile = Deno.openSync(STDOUT_LOG_PATH, {
-    create: true,
-    write: true,
-    append: true,
-  });
-  const stderrFile = Deno.openSync(STDERR_LOG_PATH, {
-    create: true,
-    write: true,
-    append: true,
-  });
+  const shellCommand = [
+    `cd ${toShellLiteral(workingDirectory)}`,
+    `touch ${toShellLiteral(STDOUT_LOG_PATH)} ${toShellLiteral(STDERR_LOG_PATH)}`,
+    `nohup ${toShellLiteral(NODE_PATH)} ${toShellLiteral(ENTRY_PATH)} >> ${toShellLiteral(STDOUT_LOG_PATH)} 2>> ${toShellLiteral(STDERR_LOG_PATH)} < /dev/null &`,
+    "echo $!",
+  ].join("\n");
 
-  try {
-    const child = new Deno.Command(NODE_PATH, {
-      args: [ENTRY_PATH],
-      cwd: workingDirectory,
-      stdin: "null",
-      stdout: stdoutFile.rid,
-      stderr: stderrFile.rid,
-    }).spawn();
-    const pid = child.pid;
-    child.unref();
-    return pid ?? null;
-  } finally {
-    stdoutFile.close();
-    stderrFile.close();
-  }
+  const cmd = new Deno.Command("sh", {
+    args: ["-c", shellCommand],
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const { stdout, stderr } = await cmd.output();
+  const err = new TextDecoder().decode(stderr).trim();
+  if (err) console.error(err);
+
+  const text = new TextDecoder().decode(stdout).trim();
+  if (!text) return null;
+  const pid = parseInt(text.split("\n").pop()?.trim() ?? "", 10);
+  return Number.isNaN(pid) ? null : pid;
 }
 
 async function waitForStartup(expectedPid: number | null): Promise<number[]> {
