@@ -11,6 +11,8 @@ import path from "node:path";
 import type { McpServer } from "@agentclientprotocol/sdk";
 import type { AcpProfile } from "./types.js";
 
+const MODEL_FLAG = "--model";
+
 function resolveStateDir(): string {
   const custom = process.env.WEIXIN_ACP_STATE_DIR?.trim();
   if (custom) return custom;
@@ -50,6 +52,46 @@ export function saveAcpConfig(config: AcpConfig): void {
 
 export function addProfile(config: AcpConfig, name: string, command: string, args?: string[], env?: Record<string, string>, mcpServers?: McpServer[]): void {
   config.profiles[name] = { command, args: args?.length ? args : undefined, env: env && Object.keys(env).length > 0 ? env : undefined, mcpServers: mcpServers?.length ? mcpServers : undefined };
+}
+
+export function getProfileModel(profile?: AcpProfile): string | undefined {
+  const args = profile?.args ?? [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === MODEL_FLAG) {
+      const next = args[i + 1]?.trim();
+      return next || undefined;
+    }
+    if (arg.startsWith(`${MODEL_FLAG}=`)) {
+      const inline = arg.slice(MODEL_FLAG.length + 1).trim();
+      return inline || undefined;
+    }
+  }
+  return undefined;
+}
+
+export function setProfileModel(profile: AcpProfile, model?: string): void {
+  const nextArgs: string[] = [];
+  const args = profile.args ?? [];
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === MODEL_FLAG) {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith(`${MODEL_FLAG}=`)) {
+      continue;
+    }
+    nextArgs.push(arg);
+  }
+
+  const normalizedModel = model?.trim();
+  if (normalizedModel) {
+    nextArgs.push(MODEL_FLAG, normalizedModel);
+  }
+
+  profile.args = nextArgs.length > 0 ? nextArgs : undefined;
 }
 
 export function removeProfile(config: AcpConfig, name: string): boolean {

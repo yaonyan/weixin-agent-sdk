@@ -7,7 +7,7 @@ import {
   ndJsonStream,
   PROTOCOL_VERSION,
 } from "@agentclientprotocol/sdk";
-import type { SessionId } from "@agentclientprotocol/sdk";
+import type { SessionId, SessionNotification } from "@agentclientprotocol/sdk";
 
 import type { AcpAgentOptions } from "./types.js";
 import { ResponseCollector } from "./response-collector.js";
@@ -39,9 +39,15 @@ export class AcpConnection {
   private collectors = new Map<SessionId, ResponseCollector>();
 
   private onExit?: () => void;
+  private onSessionUpdate?: (notification: SessionNotification) => Promise<void> | void;
 
-  constructor(private options: AcpAgentOptions, onExit?: () => void) {
+  constructor(
+    private options: AcpAgentOptions,
+    onExit?: () => void,
+    onSessionUpdate?: (notification: SessionNotification) => Promise<void> | void,
+  ) {
     this.onExit = onExit;
+    this.onSessionUpdate = onSessionUpdate;
   }
 
   registerCollector(sessionId: SessionId, collector: ResponseCollector): void {
@@ -102,6 +108,14 @@ export class AcpConnection {
               log(`thinking: ${update.content.text.slice(0, 100)}`);
             }
             break;
+          case "current_mode_update":
+            log(`current_mode_update: ${update.currentModeId}`);
+            break;
+        }
+        try {
+          await this.onSessionUpdate?.(params);
+        } catch (err) {
+          log(`session update hook failed: ${String(err)}`);
         }
         const collector = this.collectors.get(params.sessionId);
         if (collector) {

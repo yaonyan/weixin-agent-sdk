@@ -26,8 +26,10 @@ import {
   setDefaultProfile,
   getActiveProfile,
   getDefaultProfile,
+  getProfileModel,
+  setProfileModel,
 } from "./src/acp-config.js";
-import type { AcpAgentOptions } from "./src/types.js";
+import type { AcpAgentOptions, AcpProfile } from "./src/types.js";
 
 /** Built-in agent shortcuts */
 const BUILTIN_AGENTS: Record<string, { command: string; args?: string[]; env?: Record<string, string>; mcpServers?: McpServer[] }> = {
@@ -63,6 +65,38 @@ async function ensureLoggedIn() {
   }
 }
 
+function supportsModelSwitch(profile: AcpProfile): boolean {
+  const command = profile.command.toLowerCase();
+  if (command === "codebuddy") return true;
+  if (command === "cmd" && (profile.args ?? []).some((arg) => /codebuddy(?:\.cmd)?/i.test(arg))) {
+    return true;
+  }
+  return getProfileModel(profile) !== undefined;
+}
+
+function getCurrentProfileState(currentProfileName?: string): {
+  config: ReturnType<typeof loadAcpConfig>;
+  profileName: string;
+  profile: AcpProfile;
+  model?: string;
+  supportsModelSwitch: boolean;
+} | undefined {
+  const config = loadAcpConfig();
+  const profileName = currentProfileName ?? config.activeProfile;
+  if (!profileName) return undefined;
+
+  const profile = config.profiles[profileName];
+  if (!profile) return undefined;
+
+  return {
+    config,
+    profileName,
+    profile,
+    model: getProfileModel(profile),
+    supportsModelSwitch: supportsModelSwitch(profile),
+  };
+}
+
 async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string, acpEnv?: Record<string, string>, acpMcpServers?: McpServer[]) {
   await ensureLoggedIn();
 
@@ -91,6 +125,15 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
     get profileNames() {
       return Object.keys(loadAcpConfig().profiles);
     },
+    get command() {
+      return getCurrentProfileState(agent.profileName)?.profile.command;
+    },
+    get model() {
+      return getCurrentProfileState(agent.profileName)?.model;
+    },
+    get modelSwitchSupported() {
+      return getCurrentProfileState(agent.profileName)?.supportsModelSwitch ?? false;
+    },
     onSwitch: async (name: string): Promise<string | undefined> => {
       const config = loadAcpConfig();
       const profile = config.profiles[name];
@@ -103,9 +146,56 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       saveAcpConfig(config);
       return name;
     },
-    onAdd: async (name: string, cmd: string, args: string[], env?: Record<string, string>, mcpServers?: McpServer[]): Promise<string | undefined> => {
+    onAdd: async (
+      name: string,
+      cmd: string,
+      args: string[],
+      env?: Record<string, string>,
+      mcpServers?: Array<{
+        type: string;
+        name: string;
+        url?: string;
+        headers?: Array<{ name: string; value: string }>;
+        command?: string;
+        args?: string[];
+        env?: Array<{ name: string; value: string }>;
+      }>,
+    ): Promise<string | undefined> => {
+      const normalizedServers: McpServer[] | undefined = mcpServers
+        ? mcpServers.flatMap((server): McpServer[] => {
+            if (server.type === "stdio" && server.command) {
+              return [{
+                name: server.name,
+                command: server.command,
+                args: server.args ?? [],
+                env: server.env ?? [],
+              }];
+            }
+
+            if (server.type === "http" && server.url) {
+              return [{
+                type: "http",
+                name: server.name,
+                url: server.url,
+                headers: server.headers ?? [],
+              }];
+            }
+
+            if (server.type === "sse" && server.url) {
+              return [{
+                type: "sse",
+                name: server.name,
+                url: server.url,
+                headers: server.headers ?? [],
+              }];
+            }
+
+            return [];
+          })
+        : undefined;
+
       const config = loadAcpConfig();
-      addProfile(config, name, cmd, args, env, mcpServers);
+      addProfile(config, name, cmd, args, env, normalizedServers);
       saveAcpConfig(config);
       return name;
     },
@@ -115,6 +205,47 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       if (!removed) return undefined;
       saveAcpConfig(config);
       return name;
+    },
+    onGetSessionState: async (conversationId: string) => {
+      const snapshot = await agent.getSessionSnapshot(conversationId);
+      return {
+        currentModelId: snapshot.currentModelId,
+        availableModels: snapshot.availableModels?.map((model) => ({
+          id: model.modelId,
+          name: model.name,
+          description: model.description,
+        })),
+        currentModeId: snapshot.currentModeId,
+        availableModes: snapshot.availableModes?.map((mode) => ({
+          id: mode.id,
+          name: mode.name,
+          description: mode.description,
+        })),
+      };
+    },
+    onSetMode: async (conversationId: string, modeId: string) => {
+      const snapshot = await agent.setSessionMode(conversationId, modeId);
+      if (!snapshot) return undefined;
+      return {
+        currentModeId: snapshot.currentModeId,
+        availableModes: snapshot.availableModes?.map((mode) => ({
+          id: mode.id,
+          name: mode.name,
+          description: mode.description,
+        })),
+      };
+    },
+    onSetModel: async (conversationId: string, modelId: string) => {
+      const snapshot = await agent.setSessionModel(conversationId, modelId);
+      if (!snapshot) return undefined;
+      return {
+        currentModelId: snapshot.currentModelId,
+        availableModels: snapshot.availableModels?.map((model) => ({
+          id: model.modelId,
+          name: model.name,
+          description: model.description,
+        })),
+      };
     },
     onRestart: async (): Promise<void> => {
       const config = loadAcpConfig();

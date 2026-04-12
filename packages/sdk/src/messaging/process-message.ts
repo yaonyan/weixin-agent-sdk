@@ -162,9 +162,26 @@ export type ProcessMessageDeps = {
     profileName?: string;
     defaultProfileName?: string;
     profileNames?: string[];
+    command?: string;
+    model?: string;
+    modelSwitchSupported?: boolean;
     onSwitch?: (profileName: string) => Promise<string | undefined>;
     onAdd?: (name: string, command: string, args: string[], env?: Record<string, string>, mcpServers?: McpServerDef[]) => Promise<string | undefined>;
     onRm?: (name: string) => Promise<string | undefined>;
+    onGetSessionState?: (conversationId: string) => Promise<{
+      currentModelId?: string;
+      availableModels?: Array<{ id: string; name: string; description?: string | null }>;
+      currentModeId?: string;
+      availableModes?: Array<{ id: string; name: string; description?: string | null }>;
+    } | undefined>;
+    onSetMode?: (conversationId: string, modeId: string) => Promise<{
+      currentModeId?: string;
+      availableModes?: Array<{ id: string; name: string; description?: string | null }>;
+    } | undefined>;
+    onSetModel?: (conversationId: string, modelId: string) => Promise<{
+      currentModelId?: string;
+      availableModels?: Array<{ id: string; name: string; description?: string | null }>;
+    } | undefined>;
     onRestart?: () => Promise<void>;
   };
 };
@@ -250,9 +267,15 @@ export async function processOneMessage(
         onAcpSwitch: deps.acp?.onSwitch,
         onAcpAdd: deps.acp?.onAdd,
         onAcpRm: deps.acp?.onRm,
+        onAcpGetSessionState: deps.acp?.onGetSessionState,
+        onAcpSetMode: deps.acp?.onSetMode,
+        onAcpSetModel: deps.acp?.onSetModel,
         acpProfileName: deps.acp?.profileName,
         acpDefaultProfileName: deps.acp?.defaultProfileName,
         acpProfileNames: deps.acp?.profileNames,
+        acpCommand: deps.acp?.command,
+        acpModel: deps.acp?.model,
+        acpModelSwitchSupported: deps.acp?.modelSwitchSupported,
       },
       receivedAt,
       full.create_time_ms,

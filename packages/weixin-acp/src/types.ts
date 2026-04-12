@@ -1,4 +1,4 @@
-import type { McpServer } from "@agentclientprotocol/sdk";
+import type { McpServer, ModelInfo, SessionId, SessionMode } from "@agentclientprotocol/sdk";
 
 export type AcpProfile = {
   /** Command to launch the ACP agent, e.g. "claude-agent-acp" */
@@ -24,4 +24,15 @@ export type AcpAgentOptions = {
   promptTimeoutMs?: number;
   /** MCP servers to pass to the ACP agent on session creation */
   mcpServers?: McpServer[];
+};
+
+export type AcpRuntimeMode = Pick<SessionMode, "id" | "name" | "description">;
+export type AcpRuntimeModel = Pick<ModelInfo, "modelId" | "name" | "description">;
+
+export type AcpSessionSnapshot = {
+  sessionId: SessionId;
+  availableModes?: AcpRuntimeMode[];
+  currentModeId?: string;
+  availableModels?: AcpRuntimeModel[];
+  currentModelId?: string;
 };

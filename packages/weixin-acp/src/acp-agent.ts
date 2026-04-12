@@ -1,7 +1,7 @@
 import type { Agent, ChatRequest, ChatResponse } from "weixin-agent-sdk";
-import type { SessionId } from "@agentclientprotocol/sdk";
+import type { NewSessionResponse, SessionId, SessionNotification } from "@agentclientprotocol/sdk";
 
-import type { AcpAgentOptions } from "./types.js";
+import type { AcpAgentOptions, AcpSessionSnapshot } from "./types.js";
 import { AcpConnection } from "./acp-connection.js";
 import { convertRequestToContentBlocks } from "./content-converter.js";
 import { ResponseCollector } from "./response-collector.js";
@@ -10,13 +10,46 @@ function log(msg: string) {
   console.log(`[acp] ${msg}`);
 }
 
+type SessionEntry = {
+  sessionId: SessionId;
+  snapshot: AcpSessionSnapshot;
+};
+
+function cloneSnapshot(snapshot: AcpSessionSnapshot): AcpSessionSnapshot {
+  return {
+    sessionId: snapshot.sessionId,
+    currentModeId: snapshot.currentModeId,
+    currentModelId: snapshot.currentModelId,
+    availableModes: snapshot.availableModes?.map((mode) => ({ ...mode })),
+    availableModels: snapshot.availableModels?.map((model) => ({ ...model })),
+  };
+}
+
+function snapshotFromSessionResponse(response: Pick<NewSessionResponse, "sessionId" | "modes" | "models">): AcpSessionSnapshot {
+  return {
+    sessionId: response.sessionId,
+    currentModeId: response.modes?.currentModeId,
+    availableModes: response.modes?.availableModes?.map((mode) => ({
+      id: mode.id,
+      name: mode.name,
+      description: mode.description,
+    })),
+    currentModelId: response.models?.currentModelId,
+    availableModels: response.models?.availableModels?.map((model) => ({
+      modelId: model.modelId,
+      name: model.name,
+      description: model.description,
+    })),
+  };
+}
+
 /**
  * Agent adapter that bridges ACP (Agent Client Protocol) agents
  * to the weixin-agent-sdk Agent interface.
  */
 export class AcpAgent implements Agent {
   private connection: AcpConnection;
-  private sessions = new Map<string, SessionId>();
+  private sessions = new Map<string, SessionEntry>();
   private options: AcpAgentOptions;
   private currentProfileName?: string;
 
@@ -30,7 +63,8 @@ export class AcpAgent implements Agent {
     const conn = await this.connection.ensureReady();
 
     // Get or create an ACP session for this conversation
-    const sessionId = await this.getOrCreateSession(request.conversationId, conn);
+    const entry = await this.getOrCreateSessionEntry(request.conversationId, conn);
+    const sessionId = entry.sessionId;
 
     // Convert the ChatRequest to ACP ContentBlock[]
     const blocks = await convertRequestToContentBlocks(request);
@@ -59,10 +93,10 @@ export class AcpAgent implements Agent {
     return response;
   }
 
-  private async getOrCreateSession(
+  private async getOrCreateSessionEntry(
     conversationId: string,
     conn: Awaited<ReturnType<AcpConnection["ensureReady"]>>,
-  ): Promise<SessionId> {
+  ): Promise<SessionEntry> {
     const existing = this.sessions.get(conversationId);
     if (existing) return existing;
 
@@ -72,8 +106,78 @@ export class AcpAgent implements Agent {
       mcpServers: this.options.mcpServers ?? [],
     });
     log(`session created: ${res.sessionId}, cwd: ${this.options.cwd ?? process.cwd()}`);
-    this.sessions.set(conversationId, res.sessionId);
-    return res.sessionId;
+
+    const entry: SessionEntry = {
+      sessionId: res.sessionId,
+      snapshot: snapshotFromSessionResponse(res),
+    };
+    this.sessions.set(conversationId, entry);
+    return entry;
+  }
+
+  private updateSessionSnapshot(sessionId: SessionId, mutator: (snapshot: AcpSessionSnapshot) => void): void {
+    for (const entry of this.sessions.values()) {
+      if (entry.sessionId !== sessionId) continue;
+      mutator(entry.snapshot);
+      return;
+    }
+  }
+
+  private async handleSessionUpdate(notification: SessionNotification): Promise<void> {
+    const update = notification.update;
+    if (update.sessionUpdate === "current_mode_update") {
+      this.updateSessionSnapshot(notification.sessionId, (snapshot) => {
+        snapshot.currentModeId = update.currentModeId;
+      });
+    }
+  }
+
+  /**
+   * Return the current session snapshot for a conversation.
+   * Creates the session lazily if it does not exist yet.
+   */
+  async getSessionSnapshot(conversationId: string): Promise<AcpSessionSnapshot> {
+    const conn = await this.connection.ensureReady();
+    const entry = await this.getOrCreateSessionEntry(conversationId, conn);
+    return cloneSnapshot(entry.snapshot);
+  }
+
+  /**
+   * Set the runtime ACP model for a conversation session.
+   */
+  async setSessionModel(conversationId: string, modelId: string): Promise<AcpSessionSnapshot | undefined> {
+    const conn = await this.connection.ensureReady();
+    const entry = await this.getOrCreateSessionEntry(conversationId, conn);
+    const trimmedModelId = modelId.trim();
+    if (!trimmedModelId) return undefined;
+
+    const availableModels = entry.snapshot.availableModels;
+    if (availableModels?.length && !availableModels.some((model) => model.modelId === trimmedModelId)) {
+      return undefined;
+    }
+
+    await conn.unstable_setSessionModel({ sessionId: entry.sessionId, modelId: trimmedModelId });
+    entry.snapshot.currentModelId = trimmedModelId;
+    return cloneSnapshot(entry.snapshot);
+  }
+
+  /**
+   * Set the runtime ACP mode for a conversation session.
+   */
+  async setSessionMode(conversationId: string, modeId: string): Promise<AcpSessionSnapshot | undefined> {
+    const conn = await this.connection.ensureReady();
+    const entry = await this.getOrCreateSessionEntry(conversationId, conn);
+    const trimmedModeId = modeId.trim();
+    if (!trimmedModeId) return undefined;
+
+    const availableModes = entry.snapshot.availableModes;
+    if (availableModes?.length && !availableModes.some((mode) => mode.id === trimmedModeId)) {
+      return undefined;
+    }
+
+    await conn.setSessionMode({ sessionId: entry.sessionId, modeId: trimmedModeId });
+    entry.snapshot.currentModeId = trimmedModeId;
+    return cloneSnapshot(entry.snapshot);
   }
 
   /**
@@ -94,7 +198,7 @@ export class AcpAgent implements Agent {
     return new AcpConnection(options, () => {
       log("subprocess exited, clearing session cache");
       this.sessions.clear();
-    });
+    }, (notification) => this.handleSessionUpdate(notification));
   }
 
   /** Get the name of the currently active profile. */
@@ -107,13 +211,13 @@ export class AcpAgent implements Agent {
    * Sends a session/cancel notification to the ACP agent.
    */
   async stop(conversationId: string): Promise<void> {
-    const sessionId = this.sessions.get(conversationId);
-    if (!sessionId) {
+    const entry = this.sessions.get(conversationId);
+    if (!entry) {
       log(`stop: no active session for conversation=${conversationId}`);
       return;
     }
-    log(`stop: cancelling conversation=${conversationId} (session=${sessionId})`);
-    await this.connection.cancelSession(sessionId);
+    log(`stop: cancelling conversation=${conversationId} (session=${entry.sessionId})`);
+    await this.connection.cancelSession(entry.sessionId);
   }
 
   /**
@@ -121,10 +225,10 @@ export class AcpAgent implements Agent {
    * The next message will automatically create a fresh session.
    */
   clearSession(conversationId: string): void {
-    const sessionId = this.sessions.get(conversationId);
-    if (sessionId) {
-      log(`clearing session for conversation=${conversationId} (session=${sessionId})`);
-      this.connection.unregisterCollector(sessionId);
+    const entry = this.sessions.get(conversationId);
+    if (entry) {
+      log(`clearing session for conversation=${conversationId} (session=${entry.sessionId})`);
+      this.connection.unregisterCollector(entry.sessionId);
       this.sessions.delete(conversationId);
     }
   }

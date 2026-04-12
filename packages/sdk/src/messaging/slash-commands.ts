@@ -10,6 +10,8 @@
  * - /clear                  清除当前会话，重新开始对话
  * - /restart                重启底层 agent 进程
  * - /acp                    查看/切换/管理 ACP agent 配置
+ * - /model                  查看/切换当前模型
+ * - /mode                   查看/切换当前会话 mode
  */
 import type { WeixinApiOptions } from "../api/api.js";
 import { resolveWeixinAccount } from "../auth/accounts.js";
@@ -33,6 +35,19 @@ export type McpServerDef =
   | { type: "sse"; name: string; url: string; headers?: Array<{ name: string; value: string }> }
   | { type: "stdio"; name: string; command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
 
+type SessionSelectableItem = {
+  id: string;
+  name: string;
+  description?: string | null;
+};
+
+type AcpSessionStateView = {
+  currentModelId?: string;
+  availableModels?: SessionSelectableItem[];
+  currentModeId?: string;
+  availableModes?: SessionSelectableItem[];
+};
+
 export interface SlashCommandContext {
   to: string;
   contextToken?: string;
@@ -53,12 +68,24 @@ export interface SlashCommandContext {
   onAcpAdd?: (name: string, command: string, args: string[], env?: Record<string, string>, mcpServers?: McpServerDef[]) => Promise<string | undefined>;
   /** Called when /acp rm <name> is invoked. Returns the removed profile name on success. */
   onAcpRm?: (name: string) => Promise<string | undefined>;
+  /** Returns the current ACP session runtime state for a conversation. */
+  onAcpGetSessionState?: (conversationId: string) => Promise<AcpSessionStateView | undefined>;
+  /** Called when /mode <id> is invoked. Returns the resulting mode state on success. */
+  onAcpSetMode?: (conversationId: string, modeId: string) => Promise<Pick<AcpSessionStateView, "currentModeId" | "availableModes"> | undefined>;
+  /** Called when /model <id> is invoked. Returns the resulting model state on success. */
+  onAcpSetModel?: (conversationId: string, modelId: string) => Promise<Pick<AcpSessionStateView, "currentModelId" | "availableModels"> | undefined>;
   /** Get the current ACP profile name. */
   acpProfileName?: string;
   /** Get all available ACP profile names. */
   acpProfileNames?: string[];
   /** Get the default ACP profile name used by /restart recovery. */
   acpDefaultProfileName?: string;
+  /** Get the current ACP command. */
+  acpCommand?: string;
+  /** Get the current ACP model from profile args. */
+  acpModel?: string;
+  /** Whether the current ACP profile supports model switching. */
+  acpModelSwitchSupported?: boolean;
 }
 
 /** 发送回复消息 */
@@ -86,6 +113,62 @@ function buildHelpText(): string {
     "/acp <name> - 切换到指定 ACP profile",
     "/acp add <name> <command> [args...] - 添加 ACP profile",
     "/acp rm <name> - 删除 ACP profile",
+    "/model - 查看当前会话模型和可选模型列表",
+    "/model <name> - 切换当前会话模型（无需重启 ACP）",
+    "/mode - 查看当前会话 mode 和可选列表",
+    "/mode <id> - 切换当前会话 mode",
+  ].join("\n");
+}
+
+function formatSessionSelectableList(
+  label: string,
+  currentId: string | undefined,
+  items: SessionSelectableItem[] | undefined,
+): string[] {
+  if (!items || items.length === 0) {
+    return [`${label}: (当前会话未提供)`];
+  }
+
+  return [
+    `${label}:`,
+    ...items.map((item) => {
+      const current = item.id === currentId ? " [当前]" : "";
+      const alias = item.name && item.name !== item.id ? ` (${item.name})` : "";
+      const description = item.description ? ` - ${item.description}` : "";
+      return `- ${item.id}${alias}${current}${description}`;
+    }),
+  ];
+}
+
+function buildModelHelpText(ctx: SlashCommandContext, sessionState?: AcpSessionStateView): string {
+  const profileName = ctx.acpProfileName ?? "(无)";
+  const command = ctx.acpCommand ?? "(未知)";
+  const model = ctx.acpModel ?? "(未显式设置，使用底层默认模型)";
+  const supported = ctx.onAcpSetModel ? "支持（会话级，无需重启）" : "不支持";
+  return [
+    "当前模型配置",
+    `ACP: ${profileName}`,
+    `命令: ${command}`,
+    `Profile 显式模型: ${model}`,
+    `会话模型: ${sessionState?.currentModelId ?? "(当前会话未提供)"}`,
+    `可切换: ${supported}`,
+    "",
+    ...formatSessionSelectableList("可选模型", sessionState?.currentModelId, sessionState?.availableModels),
+    "",
+    "用法:",
+    "/model <name>",
+  ].join("\n");
+}
+
+function buildModeHelpText(sessionState?: AcpSessionStateView): string {
+  return [
+    "当前会话 Mode",
+    `当前: ${sessionState?.currentModeId ?? "(当前会话未提供)"}`,
+    "",
+    ...formatSessionSelectableList("可选 modes", sessionState?.currentModeId, sessionState?.availableModes),
+    "",
+    "用法:",
+    "/mode <id>",
   ].join("\n");
 }
 
@@ -104,8 +187,20 @@ function buildStatusText(ctx: SlashCommandContext): string {
   if (ctx.acpProfileName !== undefined) {
     lines.push(`ACP: ${ctx.acpProfileName}`);
   }
+  if (ctx.acpCommand !== undefined) {
+    lines.push(`ACP 命令: ${ctx.acpCommand}`);
+  }
+  if (ctx.acpModel !== undefined) {
+    lines.push(`ACP 模型: ${ctx.acpModel}`);
+  }
+  if (ctx.acpModel === undefined && ctx.acpModelSwitchSupported) {
+    lines.push("ACP 模型: (未显式设置，使用底层默认模型)");
+  }
   if (ctx.acpDefaultProfileName !== undefined) {
     lines.push(`ACP 默认: ${ctx.acpDefaultProfileName}`);
+  }
+  if (ctx.acpModelSwitchSupported !== undefined) {
+    lines.push(`模型切换: ${ctx.acpModelSwitchSupported ? "会话级（无需重启）" : "不支持"}`);
   }
   return lines.join("\n");
 }
@@ -206,6 +301,66 @@ export async function handleSlashCommand(
         }
         await ctx.onRestart();
         await sendReply(ctx, "✅ ACP 进程已重启");
+        return { handled: true };
+      }
+      case "/model": {
+        const sessionState = await ctx.onAcpGetSessionState?.(ctx.to);
+        const requestedModel = args.trim();
+
+        if (!requestedModel || ["list", "ls"].includes(requestedModel.toLowerCase())) {
+          await sendReply(ctx, buildModelHelpText(ctx, sessionState));
+          return { handled: true };
+        }
+
+        if (["clear", "reset", "default"].includes(requestedModel.toLowerCase())) {
+          await sendReply(
+            ctx,
+            "当前 `/model` 已改为会话级切换；ACP SDK 暂无 clear/default 接口。若要回到底层默认模型，请用 `/clear` 新建会话，或调整 profile 默认模型后再开启新会话。",
+          );
+          return { handled: true };
+        }
+
+        if (!ctx.onAcpSetModel) {
+          await sendReply(ctx, `${buildModelHelpText(ctx, sessionState)}\n\n当前 agent 不支持 /model 切换`);
+          return { handled: true };
+        }
+
+        const result = await ctx.onAcpSetModel(ctx.to, requestedModel);
+        if (!result) {
+          await sendReply(ctx, `❌ model \"${requestedModel}\" 不可用`);
+          return { handled: true };
+        }
+
+        await sendReply(
+          ctx,
+          `✅ 已切换当前会话模型\n当前: ${result.currentModelId ?? requestedModel}`,
+        );
+        return { handled: true };
+      }
+      case "/mode": {
+        const sessionState = await ctx.onAcpGetSessionState?.(ctx.to);
+        const requestedMode = args.trim();
+
+        if (!requestedMode || ["list", "ls"].includes(requestedMode.toLowerCase())) {
+          await sendReply(ctx, buildModeHelpText(sessionState));
+          return { handled: true };
+        }
+
+        if (!ctx.onAcpSetMode) {
+          await sendReply(ctx, `${buildModeHelpText(sessionState)}\n\n当前 agent 不支持 /mode 切换`);
+          return { handled: true };
+        }
+
+        const result = await ctx.onAcpSetMode(ctx.to, requestedMode);
+        if (!result) {
+          await sendReply(ctx, `❌ mode \"${requestedMode}\" 不可用`);
+          return { handled: true };
+        }
+
+        await sendReply(
+          ctx,
+          `✅ 已切换当前会话 mode\n当前: ${result.currentModeId ?? requestedMode}`,
+        );
         return { handled: true };
       }
       case "/acp": {
