@@ -1,0 +1,32 @@
+{
+  "_comment": "weixin-acp profile config — place at ~/.config/weixin-acp/acp-profiles.json — override with WEIXIN_ACP_STATE_DIR or XDG_CONFIG_HOME",
+  "profiles": {
+    "claude-code": {
+      "command": "claude-agent-acp"
+    },
+    "codex": {
+      "command": "codex-acp"
+    },
+    "copilot": {
+      "command": "copilot",
+      "args": ["--acp"]
+    },
+    "codebuddy": {
+      "command": "cmd",
+      "args": ["/c", "codebuddy.cmd", "--acp"],
+      "env": {
+        "CODEBUDDY_DEFER_TOOL_LOADING": "false"
+      },
+      "mcpServers": [
+        {
+          "type": "sse",
+          "name": "mcpc",
+          "url": "http://127.0.0.1:3000/sse",
+          "headers": []
+        }
+      ]
+    }
+  },
+  "activeProfile": "codebuddy",
+  "defaultProfile": "codebuddy"
+}

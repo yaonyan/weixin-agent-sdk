@@ -1,7 +1,7 @@
 /**
  * ACP profile configuration — persistent profiles for switching ACP agents.
  *
- * Config file: `~/.openclaw/acp-profiles.json`
+ * Config file: `~/.config/weixin-acp/acp-profiles.json` (XDG: `$XDG_CONFIG_HOME/weixin-acp/`)
  */
 
 import fs from "node:fs";
@@ -13,9 +13,9 @@ import type { AcpProfile } from "./types.js";
 
 function resolveStateDir(): string {
   return (
-    process.env.OPENCLAW_STATE_DIR?.trim() ||
-    process.env.CLAWDBOT_STATE_DIR?.trim() ||
-    path.join(os.homedir(), ".openclaw")
+    process.env.WEIXIN_ACP_STATE_DIR?.trim() ||
+    process.env.XDG_CONFIG_HOME?.trim() ||
+    path.join(os.homedir(), ".config", "weixin-acp")
   );
 }
 
