@@ -15,6 +15,11 @@ export interface Agent {
   restart?(): Promise<void>;
   /** Cancel the active prompt turn for a conversation. */
   stop?(conversationId: string): Promise<void>;
+  /**
+   * Claim the one-time greeting for an upcoming cold start.
+   * Returns true only for the first caller before the backend is ready.
+   */
+  claimColdStartGreeting?(): boolean;
 }
 
 export interface ChatRequest {

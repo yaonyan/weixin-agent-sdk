@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { execSync } from "node:child_process";
 import spawn from "cross-spawn";
 import { Readable, Writable } from "node:stream";
 
@@ -29,6 +30,31 @@ function describeToolCall(update: {
   return update.title ?? update.kind ?? update.toolCallId ?? "tool";
 }
 
+const isWindows = process.platform === "win32";
+
+/**
+ * Kill a child process and its entire process tree.
+ * On Windows, `process.kill()` only kills the immediate process, leaving
+ * grandchildren (e.g. MCP proxy nodes) orphaned. Use `taskkill /T` instead.
+ */
+function killProcessTree(proc: ChildProcess): void {
+  const pid = proc.pid;
+  if (pid == null) {
+    proc.kill();
+    return;
+  }
+  if (isWindows) {
+    try {
+      execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
+    } catch {
+      // Process may have already exited; fall back to normal kill.
+      try { proc.kill(); } catch { /* already dead */ }
+    }
+  } else {
+    try { proc.kill(); } catch { /* already dead */ }
+  }
+}
+
 /**
  * Manages the ACP agent subprocess and ClientSideConnection lifecycle.
  */
@@ -57,6 +83,14 @@ export class AcpConnection {
 
   unregisterCollector(sessionId: SessionId): void {
     this.collectors.delete(sessionId);
+  }
+
+  isReady(): boolean {
+    return this.ready;
+  }
+
+  isInitializing(): boolean {
+    return this.initPromise !== null;
   }
 
   /**
@@ -187,14 +221,14 @@ export class AcpConnection {
   }
 
   /**
-   * Kill the subprocess and clean up.
+   * Kill the subprocess and its entire process tree, then clean up.
    */
   dispose(): void {
     this.ready = false;
     this.initPromise = null;
     this.collectors.clear();
     if (this.process) {
-      this.process.kill();
+      killProcessTree(this.process);
       this.process = null;
     }
     this.connection = null;

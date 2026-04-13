@@ -25,6 +25,7 @@ const MEDIA_TEMP_DIR = path.join(os.tmpdir(), "weixin-agent/media");
 const TOOL_CALL_MIN_INTERVAL_MS = 30_000;
 /** Short debounce window (ms) before sending the first buffered message. */
 const TOOL_CALL_FIRST_SEND_DELAY_MS = 2_000;
+const ACP_COLD_START_GREETING = "你好，我刚刚醒。";
 
 /**
  * Buffers verbose tool-call messages and sends them with rate-limiting:
@@ -367,6 +368,18 @@ export async function processOneMessage(
 
   // --- Call agent & send reply ---
   try {
+    if (contextToken && deps.agent.claimColdStartGreeting?.()) {
+      try {
+        await sendMessageWeixin({
+          to,
+          text: ACP_COLD_START_GREETING,
+          opts: { baseUrl: deps.baseUrl, token: deps.token, contextToken },
+        });
+      } catch (err) {
+        deps.errLog(`[weixin] failed to send ACP cold-start greeting: ${String(err)}`);
+      }
+    }
+
     const response = await deps.agent.chat(request);
 
     // If the prompt was cancelled by the user, skip sending the AI reply

@@ -60,11 +60,13 @@ function sleep(ms: number): Promise<void> {
 
 async function findPids(): Promise<number[]> {
   if (isWindows) {
+    // Match only the parent weixin-acp node process (running main.mjs),
+    // not child processes like codebuddy --acp whose cwd contains weixin-acp.
     const cmd = new Deno.Command("powershell", {
       args: [
         "-NoProfile",
         "-Command",
-        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*weixin-acp*' -and $_.Name -eq 'node.exe' } | Select-Object -ExpandProperty ProcessId`,
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*weixin-acp*main.mjs*' -and $_.Name -eq 'node.exe' } | Select-Object -ExpandProperty ProcessId`,
       ],
       stdout: "piped",
       stderr: "piped",
@@ -128,8 +130,8 @@ async function startProcess(): Promise<number | null> {
 
   if (isWindows) {
     // Use PowerShell Start-Process to launch detached with file redirection.
+    // Note: -RedirectStandardOutput truncates the file on each restart.
     // The -NoNewWindow flag prevents the popup console window.
-    // File handles are owned by the child process, not Deno, so they survive our exit.
     const ps = new Deno.Command("powershell", {
       args: [
         "-NoProfile",
@@ -152,7 +154,7 @@ async function startProcess(): Promise<number | null> {
     child.unref();
 
     // Give the node process a moment to appear, then find its pid via WMI.
-    await sleep(1500);
+    await sleep(2000);
     const pids = await findPids();
     return pids.length > 0 ? pids[0] : null;
   }

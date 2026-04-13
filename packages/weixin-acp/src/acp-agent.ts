@@ -10,6 +10,21 @@ function log(msg: string) {
   console.log(`[acp] ${msg}`);
 }
 
+/** Maximum time (ms) to wait for a single prompt round-trip before giving up. */
+const PROMPT_TIMEOUT_MS = 10 * 60_000; // 10 minutes
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label}: timed out after ${ms / 1000}s`));
+    }, ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 type SessionEntry = {
   sessionId: SessionId;
   snapshot: AcpSessionSnapshot;
@@ -52,6 +67,7 @@ export class AcpAgent implements Agent {
   private sessions = new Map<string, SessionEntry>();
   private options: AcpAgentOptions;
   private currentProfileName?: string;
+  private coldStartGreetingClaimed = false;
 
   constructor(options: AcpAgentOptions, profileName?: string) {
     this.options = options;
@@ -60,7 +76,13 @@ export class AcpAgent implements Agent {
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
-    const conn = await this.connection.ensureReady();
+    let conn;
+    try {
+      conn = await this.connection.ensureReady();
+    } catch (err) {
+      this.coldStartGreetingClaimed = false;
+      throw err;
+    }
 
     // Get or create an ACP session for this conversation
     const entry = await this.getOrCreateSessionEntry(request.conversationId, conn);
@@ -80,7 +102,11 @@ export class AcpAgent implements Agent {
     this.connection.registerCollector(sessionId, collector);
     let promptResponse: { stopReason?: string } | undefined;
     try {
-      promptResponse = await conn.prompt({ sessionId, prompt: blocks });
+      promptResponse = await withTimeout(
+        conn.prompt({ sessionId, prompt: blocks }),
+        PROMPT_TIMEOUT_MS,
+        "acp prompt",
+      );
     } finally {
       this.connection.unregisterCollector(sessionId);
     }
@@ -189,15 +215,28 @@ export class AcpAgent implements Agent {
     log(`switching profile: ${this.currentProfileName ?? "(none)"} → ${name}`);
     this.connection.dispose();
     this.sessions.clear();
+    this.coldStartGreetingClaimed = false;
     this.options = options;
     this.currentProfileName = name;
     this.connection = this.createConnection(options);
+  }
+
+  claimColdStartGreeting(): boolean {
+    if (this.connection.isReady() || this.connection.isInitializing()) {
+      return false;
+    }
+    if (this.coldStartGreetingClaimed) {
+      return false;
+    }
+    this.coldStartGreetingClaimed = true;
+    return true;
   }
 
   private createConnection(options: AcpAgentOptions): AcpConnection {
     return new AcpConnection(options, () => {
       log("subprocess exited, clearing session cache");
       this.sessions.clear();
+      this.coldStartGreetingClaimed = false;
     }, (notification) => this.handleSessionUpdate(notification));
   }
 
@@ -239,6 +278,7 @@ export class AcpAgent implements Agent {
   async restart(): Promise<void> {
     log("restarting ACP subprocess");
     this.sessions.clear();
+    this.coldStartGreetingClaimed = false;
     await this.connection.restart();
   }
 
@@ -247,6 +287,7 @@ export class AcpAgent implements Agent {
    */
   dispose(): void {
     this.sessions.clear();
+    this.coldStartGreetingClaimed = false;
     this.connection.dispose();
   }
 }

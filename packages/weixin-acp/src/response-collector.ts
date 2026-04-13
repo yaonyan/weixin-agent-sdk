@@ -80,18 +80,17 @@ function formatToolParams(obj: Record<string, unknown>): string {
 function formatToolCall(title: string, rawInput: unknown): string {
   const parsed = parseRawInput(rawInput);
   if (parsed == null) {
-    return [`---`, `🔧 ${title}`, `---`].join("\n");
+    return [`---`, `🔧 ${title}`].join("\n");
   }
 
   if (typeof parsed === "object" && !Array.isArray(parsed) && parsed !== null) {
-    return [`---`, `🔧 ${title}`, formatToolParams(parsed as Record<string, unknown>), `---`].join("\n");
+    return [`---`, `🔧 ${title}`, formatToolParams(parsed as Record<string, unknown>)].join("\n");
   }
 
   return [
     `---`,
     `🔧 ${title}`,
     `- 输入: ${summarizeValue(parsed)}`,
-    `---`,
   ].join("\n");
 }
 
