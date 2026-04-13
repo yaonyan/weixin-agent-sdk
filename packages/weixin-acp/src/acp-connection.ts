@@ -104,9 +104,14 @@ export class AcpConnection {
     if (this.initPromise) {
       return this.initPromise;
     }
-    this.initPromise = this._doInit().finally(() => {
-      this.initPromise = null;
+    // Capture the promise reference so .finally() only clears if no newer
+    // initPromise has been set (e.g. after dispose() + new ensureReady()).
+    const promise = this._doInit().finally(() => {
+      if (this.initPromise === promise) {
+        this.initPromise = null;
+      }
     });
+    this.initPromise = promise;
     return this.initPromise;
   }
 
@@ -225,6 +230,10 @@ export class AcpConnection {
    */
   dispose(): void {
     this.ready = false;
+    // Clear initPromise so the old .finally() won't overwrite a newer one.
+    // The old promise will still resolve/reject, but its .finally() guard
+    // (`if (this.initPromise === promise)`) will skip the null-assignment
+    // because this.initPromise no longer references it.
     this.initPromise = null;
     this.collectors.clear();
     if (this.process) {

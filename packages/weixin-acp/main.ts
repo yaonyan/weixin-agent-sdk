@@ -248,17 +248,6 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       };
     },
     onRestart: async (): Promise<void> => {
-      const config = loadAcpConfig();
-      const defaultName = config.defaultProfile;
-      const defaultProfile = getDefaultProfile(config);
-      if (defaultName && defaultProfile) {
-        await agent.switchProfile(
-          defaultName,
-          createAgentOptions(defaultProfile.command, defaultProfile.args, defaultProfile.env, cwd, defaultProfile.mcpServers),
-        );
-        setActiveProfile(config, defaultName);
-        saveAcpConfig(config);
-      }
       await agent.restart();
     },
   };
