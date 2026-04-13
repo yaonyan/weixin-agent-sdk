@@ -6,9 +6,13 @@ import { MessageItemType } from "../api/types.js";
 import { WeixinConfigManager } from "../api/config-cache.js";
 import { SESSION_EXPIRED_ERRCODE, pauseSession, getRemainingPauseMs } from "../api/session-guard.js";
 import { processOneMessage } from "../messaging/process-message.js";
+import { getContextToken } from "../messaging/inbound.js";
+import { markdownToPlainText, sendMessageWeixin } from "../messaging/send.js";
 import { getSyncBufFilePath, loadGetUpdatesBuf, saveGetUpdatesBuf } from "../storage/sync-buf.js";
 import { logger } from "../util/logger.js";
 import { redactBody } from "../util/redact.js";
+
+const ACP_COLD_START_GREETING = "你好，我刚刚醒。";
 
 const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -20,6 +24,8 @@ export type MonitorWeixinOpts = {
   cdnBaseUrl: string;
   token?: string;
   accountId: string;
+  /** The logged-in user's ID, used for proactive cold-start greeting. */
+  userId?: string;
   agent: Agent;
   abortSignal?: AbortSignal;
   longPollTimeoutMs?: number;
@@ -62,6 +68,29 @@ export async function monitorWeixinProvider(opts: MonitorWeixinOpts): Promise<vo
   }
 
   const configManager = new WeixinConfigManager({ baseUrl, token }, log);
+
+  // --- Proactive cold-start greeting ---
+  // If the agent supports cold-start greeting AND we have a persisted context_token
+  // from a previous session, send the greeting immediately — before the user has
+  // to send a message first.
+  if (opts.userId && agent.claimColdStartGreeting?.()) {
+    const cachedContextToken = getContextToken(accountId, opts.userId);
+    if (cachedContextToken) {
+      log(`[weixin] sending proactive cold-start greeting to ${opts.userId}`);
+      try {
+        await sendMessageWeixin({
+          to: opts.userId,
+          text: ACP_COLD_START_GREETING,
+          opts: { baseUrl, token, contextToken: cachedContextToken },
+        });
+        log(`[weixin] cold-start greeting sent successfully`);
+      } catch (err) {
+        log(`[weixin] cold-start greeting failed (token may be expired): ${String(err)}`);
+      }
+    } else {
+      log(`[weixin] no cached context_token for cold-start greeting, will greet on first message`);
+    }
+  }
 
   let nextTimeoutMs = longPollTimeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
   let consecutiveFailures = 0;

@@ -268,6 +268,7 @@ export async function start(agent: Agent, opts?: StartOptions): Promise<Bot> {
     cdnBaseUrl: account.cdnBaseUrl,
     token: account.token,
     accountId: account.accountId,
+    userId,
     agent,
     abortSignal: opts?.abortSignal,
     log,
