@@ -7,26 +7,15 @@
     "codex": {
       "command": "codex-acp"
     },
+    "gemini-internal": {
+      "command": "gemini-internal",
+      "args": ["--experimental-acp"]
+    },
     "copilot": {
       "command": "copilot",
       "args": ["--acp"]
-    },
-    "codebuddy": {
-      "command": "cmd",
-      "args": ["/c", "codebuddy.cmd", "--acp"],
-      "env": {
-        "CODEBUDDY_DEFER_TOOL_LOADING": "false"
-      },
-      "mcpServers": [
-        {
-          "type": "sse",
-          "name": "mcpc",
-          "url": "http://127.0.0.1:3000/sse",
-          "headers": []
-        }
-      ]
     }
   },
-  "activeProfile": "codebuddy",
-  "defaultProfile": "codebuddy"
+  "activeProfile": "copilot",
+  "defaultProfile": "copilot"
 }
