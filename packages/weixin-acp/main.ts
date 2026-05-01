@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import os from "node:os";
+
 /**
  * WeChat + ACP (Agent Client Protocol) adapter.
  *
@@ -105,7 +107,7 @@ async function startAgent(
 ) {
   await ensureLoggedIn();
 
-  const cwd = process.cwd();
+  const cwd = os.homedir();
   const agent = new AcpAgent(createAgentOptions(acpCommand, acpArgs, acpEnv, cwd, acpMcpServers), profileName);
 
   const ac = new AbortController();
