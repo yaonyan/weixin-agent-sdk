@@ -27,7 +27,6 @@ import {
   getActiveProfile,
   getDefaultProfile,
   getProfileModel,
-  setProfileModel,
 } from "./src/acp-config.js";
 import type { AcpAgentOptions, AcpProfile } from "./src/types.js";
 
@@ -97,7 +96,13 @@ function getCurrentProfileState(currentProfileName?: string): {
   };
 }
 
-async function startAgent(acpCommand: string, acpArgs: string[] = [], profileName?: string, acpEnv?: Record<string, string>, acpMcpServers?: McpServer[]) {
+async function startAgent(
+  acpCommand: string,
+  acpArgs: string[] = [],
+  profileName?: string,
+  acpEnv?: Record<string, string>,
+  acpMcpServers?: McpServer[],
+) {
   await ensureLoggedIn();
 
   const cwd = process.cwd();
@@ -140,7 +145,13 @@ async function startAgent(acpCommand: string, acpArgs: string[] = [], profileNam
       if (!profile) return undefined;
       await agent.switchProfile(
         name,
-        createAgentOptions(profile.command, profile.args, profile.env, cwd, profile.mcpServers),
+        createAgentOptions(
+          profile.command,
+          profile.args,
+          profile.env,
+          cwd,
+          profile.mcpServers,
+        ),
       );
       setActiveProfile(config, name);
       saveAcpConfig(config);

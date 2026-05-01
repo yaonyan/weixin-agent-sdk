@@ -138,7 +138,27 @@ export class AcpAgent implements Agent {
       snapshot: snapshotFromSessionResponse(res),
     };
     this.sessions.set(conversationId, entry);
+    await this.restoreInitialMode(entry, conn);
     return entry;
+  }
+
+  private async restoreInitialMode(
+    entry: SessionEntry,
+    conn: Awaited<ReturnType<AcpConnection["ensureReady"]>>,
+  ): Promise<void> {
+    const availableModes = entry.snapshot.availableModes;
+    const targetModeId = availableModes?.at(-1)?.id;
+    if (!targetModeId || entry.snapshot.currentModeId === targetModeId) {
+      return;
+    }
+
+    try {
+      await conn.setSessionMode({ sessionId: entry.sessionId, modeId: targetModeId });
+      entry.snapshot.currentModeId = targetModeId;
+      log(`restored initial mode: ${targetModeId} (session=${entry.sessionId})`);
+    } catch (err) {
+      log(`failed to restore initial mode ${targetModeId}: ${String(err)}`);
+    }
   }
 
   private updateSessionSnapshot(sessionId: SessionId, mutator: (snapshot: AcpSessionSnapshot) => void): void {

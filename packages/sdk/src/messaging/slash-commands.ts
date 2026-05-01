@@ -115,7 +115,7 @@ function buildHelpText(): string {
     "/acp rm <name> - 删除 ACP profile",
     "/model - 查看当前会话模型和可选模型列表",
     "/model <name> - 切换当前会话模型（无需重启 ACP）",
-    "/mode - 查看当前会话 mode 和可选列表",
+    "/mode - 查看当前会话 mode、可选列表和默认规则",
     "/mode <id> - 切换当前会话 mode",
   ].join("\n");
 }
@@ -166,6 +166,10 @@ function buildModeHelpText(sessionState?: AcpSessionStateView): string {
     `当前: ${sessionState?.currentModeId ?? "(当前会话未提供)"}`,
     "",
     ...formatSessionSelectableList("可选 modes", sessionState?.currentModeId, sessionState?.availableModes),
+    "",
+    "说明:",
+    "- /mode <id> 会切换当前会话 mode",
+    "- 新建 session 后默认会自动切到可选 modes 列表最后一个",
     "",
     "用法:",
     "/mode <id>",
