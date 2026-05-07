@@ -119,7 +119,7 @@ async function killProcesses(pids: number[]): Promise<void> {
 }
 
 async function startProcess(): Promise<number | null> {
-  const workingDirectory = __dirname;
+  const workingDirectory = homedir();
   mkdirSync(STATE_DIR, { recursive: true });
 
   console.log("Starting weixin-acp");
