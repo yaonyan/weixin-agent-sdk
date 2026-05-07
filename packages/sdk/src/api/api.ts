@@ -49,11 +49,11 @@ export function buildBaseInfo(): BaseInfo {
 }
 
 /** Default timeout for long-poll getUpdates requests. */
-const DEFAULT_LONG_POLL_TIMEOUT_MS = 6_000_000;
+const DEFAULT_LONG_POLL_TIMEOUT_MS = 600_000;
 /** Default timeout for regular API requests (sendMessage, getUploadUrl). */
-const DEFAULT_API_TIMEOUT_MS = 6_000_000;
+const DEFAULT_API_TIMEOUT_MS = 600_000;
 /** Default timeout for lightweight API requests (getConfig, sendTyping). */
-const DEFAULT_CONFIG_TIMEOUT_MS = 6_000_000;
+const DEFAULT_CONFIG_TIMEOUT_MS = 600_000;
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith("/") ? url : `${url}/`;

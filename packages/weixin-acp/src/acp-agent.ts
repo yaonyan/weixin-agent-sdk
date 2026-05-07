@@ -11,7 +11,7 @@ function log(msg: string) {
 }
 
 /** Maximum time (ms) to wait for a single prompt round-trip before giving up. */
-const PROMPT_TIMEOUT_MS = 10 * 60_000; // 10 minutes
+const PROMPT_TIMEOUT_MS = 12 * 60 * 60_000; // 12 hours
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
