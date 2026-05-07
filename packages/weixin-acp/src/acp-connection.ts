@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
 } from "@agentclientprotocol/sdk";
 import type { SessionId, SessionNotification } from "@agentclientprotocol/sdk";
+import { logger } from "weixin-agent-sdk";
 
 import type { AcpAgentOptions } from "./types.js";
 import { ResponseCollector } from "./response-collector.js";
@@ -28,6 +29,18 @@ function describeToolCall(update: {
   toolCallId?: string;
 }): string {
   return update.title ?? update.kind ?? update.toolCallId ?? "tool";
+}
+
+function serializeForLog(value: unknown): string {
+  if (value == null) return "null";
+  if (typeof value === "string") return value;
+  try {
+    const json = JSON.stringify(value);
+    if (json != null) return json;
+  } catch {
+    // Fall through to string conversion.
+  }
+  return String(value);
 }
 
 const isWindows = process.platform === "win32";
@@ -152,6 +165,7 @@ export class AcpConnection {
         switch (update.sessionUpdate) {
           case "tool_call":
             log(`tool_call: ${describeToolCall(update)} (${update.status ?? "started"})`);
+            logger.info(`[acp-tool-call-update] ${serializeForLog(update)}`);
             break;
           case "tool_call_update":
             if (update.status) {
