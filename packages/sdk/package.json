@@ -12,6 +12,9 @@
       "default": "./dist/index.mjs"
     }
   },
+  "bin": {
+    "weixin-send": "./dist/src/bin/weixin-send.mjs"
+  },
   "files": [
     "dist"
   ],
