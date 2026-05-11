@@ -1,110 +1,236 @@
 # weixin-agent-sdk
 
-微信 + AI Agent 桥接 SDK，通过 [ACP (Agent Client Protocol)](https://github.com/AcpProtocol/acp) 将任意 AI Agent 接入微信。
+Bridge any AI agent to WeChat via [ACP (Agent Client Protocol)](https://github.com/AcpProtocol/acp).
 
-## 包结构
+## Packages
 
-| 包 | 说明 |
-|---|---|
-| `weixin-agent-sdk` | 核心 SDK — 提供微信消息收发、登录、斜杠指令等基础能力 |
-| `weixin-acp` | ACP 适配器 — 开箱即用地将 ACP agent (Claude Code, Codex, Copilot, Codebuddy 等) 接入微信 |
-| `example-openai` | 示例 — 使用 OpenAI 接口的简单 agent |
+| Package | Description |
+|---------|-------------|
+| `weixin-agent-sdk` | Core SDK — WeChat messaging, login, slash commands, media send |
+| `weixin-acp` | ACP adapter — connect any ACP agent (Claude Code, Codex, Copilot, Codebuddy …) to WeChat out of the box |
+| `example-openai` | Example — simple agent backed by the OpenAI API |
 
-## 快速开始
+---
 
-### 安装
+## Quick start
+
+### Using `weixin-acp` (recommended)
 
 ```bash
-npx weixin-acp login          # 扫码登录微信
-npx weixin-acp claude-code    # 使用 Claude Code
-npx weixin-acp codex          # 使用 Codex
-npx weixin-acp copilot        # 使用 GitHub Copilot
-npx weixin-acp codebuddy      # 使用 Codebuddy
-npx weixin-acp start -- <command> [args...]  # 使用自定义 agent
+# Log in via QR code
+npx weixin-acp login
+
+# Start with a built-in ACP agent
+npx weixin-acp claude-code   # Claude Code
+npx weixin-acp codex         # Codex
+npx weixin-acp copilot       # GitHub Copilot
+npx weixin-acp codebuddy     # Codebuddy
+
+# Start with any custom ACP-compatible command
+npx weixin-acp start -- <command> [args...]
 ```
 
-### 从源码运行
+### From source
 
 ```bash
-git clone https://github.com/wong2/weixin-agent-sdk.git
+git clone https://github.com/yaonyan/weixin-agent-sdk.git
 cd weixin-agent-sdk
 pnpm install
 
-# 构建（需按顺序：SDK → ACP）
+# Build (order matters: SDK first, then ACP)
 pnpm --filter weixin-agent-sdk run build
 pnpm --filter weixin-acp run build
 
-# 扫码登录微信（首次或会话过期后需要）
+# Log in
 pnpm --filter weixin-acp run login
 
-# 启动 agent
+# Start
 pnpm --filter weixin-acp run start -- claude-agent-acp
-
-# 或使用 restart.ts（需要 Deno，支持 Windows / macOS / Linux）
-deno run -A restart.ts
 ```
 
-## 微信内命令
+### Custom agent (OpenAI example)
 
-在微信聊天中发送以下斜杠命令：
+Implement the `Agent` interface and pass it to `start()`:
 
-| 命令 | 说明 |
-|---|---|
-| `/help` | 显示帮助信息 |
-| `/status` | 查看当前状态 |
-| `/stop` | 停止当前对话 |
-| `/echo <message>` | 直接回复并显示通道耗时 |
-| `/toggle-debug` | 开关 debug 模式 |
-| `/verbose` | 开关 verbose 模式（显示工具调用信息） |
-| `/clear` | 清除当前会话 |
-| `/restart` | 重启底层 agent 进程 |
-| `/acp` | 查看 ACP 配置 |
-| `/acp <name>` | 切换到指定 profile |
-| `/acp add <name> <command> [args...]` | 添加 profile |
-| `/acp rm <name>` | 删除 profile |
+```typescript
+import { login, start } from "weixin-agent-sdk";
+import type { Agent, ChatRequest, ChatResponse } from "weixin-agent-sdk";
 
-## ACP Profile 配置
+class MyAgent implements Agent {
+  async chat(request: ChatRequest): Promise<ChatResponse> {
+    return { text: `You said: ${request.text}` };
+  }
+}
 
-Profile 配置存储在 `~/.config/weixin-acp/acp-profiles.json`（遵循 XDG 规范）。
+// QR-code login (once)
+await login();
 
-可通过环境变量覆盖配置目录：
-- `WEIXIN_ACP_STATE_DIR` — 直接指定配置目录
-- `XDG_CONFIG_HOME` — 使用 XDG 标准路径（`$XDG_CONFIG_HOME/weixin-acp/`）
+// Start the bot
+await start(new MyAgent());
+```
 
-示例配置见 [acp-profiles.example.json](./acp-profiles.example.json)。
+See `packages/example-openai` for a full working example with OpenAI.
 
-### Profile 字段
+---
+
+## ACP profile configuration
+
+Profiles are stored at `~/.config/weixin-acp/acp-profiles.json` (XDG).  
+Override the directory with `WEIXIN_ACP_STATE_DIR` or `XDG_CONFIG_HOME`.
 
 ```jsonc
 {
-  "command": "claude-agent-acp",  // 启动 ACP agent 的命令
-  "args": [],                     // 命令参数
-  "env": {},                      // 额外环境变量
-  "mcpServers": []                // 传给 agent 的 MCP server 定义
+  "profiles": {
+    "claude-code": { "command": "claude-agent-acp" },
+    "codex":       { "command": "codex-acp" },
+    "copilot":     { "command": "copilot", "args": ["--acp"] }
+  },
+  "activeProfile": "claude-code",
+  "defaultProfile": "claude-code"
 }
 ```
 
-### MCP Server 类型
+See [`acp-profiles.example.json`](./acp-profiles.example.json) for a full reference.
+
+### Profile fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | `string` | Command to launch the ACP agent subprocess |
+| `args` | `string[]` | Extra command-line arguments |
+| `env` | `Record<string,string>` | Extra environment variables |
+| `mcpServers` | `McpServerDef[]` | MCP servers passed to the agent |
+
+### MCP server types
 
 ```jsonc
 // SSE
-{ "type": "sse", "name": "my-server", "url": "http://localhost:3000/sse", "headers": [] }
+{ "type": "sse",   "name": "my-server", "url": "http://localhost:3000/sse" }
 
 // HTTP Streamable
-{ "type": "http", "name": "my-server", "url": "http://localhost:3000/mcp", "headers": [] }
+{ "type": "http",  "name": "my-server", "url": "http://localhost:3000/mcp" }
 
 // Stdio
-{ "type": "stdio", "name": "my-server", "command": "npx", "args": ["my-mcp-server"], "env": [] }
+{ "type": "stdio", "name": "my-server", "command": "npx", "args": ["my-mcp-server"] }
 ```
 
-## 开发
+---
+
+## Slash commands
+
+Send any of the following from the WeChat chat window:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show help |
+| `/status` | Show current bot and account status |
+| `/stop` | Cancel the current in-progress response |
+| `/echo <message>` | Echo the message back with channel latency |
+| `/clear` | Clear the current session |
+| `/restart` | Restart the underlying agent subprocess |
+| `/verbose` | Toggle verbose mode (streams live tool-call updates) |
+| `/toggle-debug` | Toggle debug logging |
+| `/model` | Show the current model |
+| `/model <id>` | Switch model (if the agent supports it) |
+| `/mode` | Show the current mode |
+| `/mode <id>` | Switch mode (if the agent supports it) |
+| `/acp` | Show current ACP profile and available profiles |
+| `/acp <name>` | Switch to a different profile |
+| `/acp add <name> <command> [args...]` | Register a new profile |
+| `/acp rm <name>` | Remove a profile |
+
+---
+
+## Sending images mid-work
+
+The SDK ships a `weixin-send` CLI that lets any agent push images or messages to the WeChat user **during** a task, without waiting for the task to finish.
+
+```bash
+# Check the CLI is available
+which weixin-send
+
+# If not found, link it from the SDK package
+cd packages/sdk && npm link
+
+# Send an image
+weixin-send /tmp/chart.png
+
+# Send an image with a caption
+weixin-send /tmp/report.png --text "Report is ready"
+
+# Send a plain text message
+weixin-send --text "Step 1 done, moving on to step 2..."
+
+# Send a remote image (auto-downloaded)
+weixin-send https://example.com/result.png
+
+# Check account and token status
+weixin-send --list-accounts
+```
+
+The agent returns `{ text?, media?: { type, url } }` from `chat()` for end-of-turn delivery, or calls `weixin-send` at any point during work for immediate delivery.
+
+---
+
+## `ChatRequest` / `ChatResponse` reference
+
+```typescript
+interface ChatRequest {
+  conversationId: string;       // WeChat user ID — use for per-user context
+  text: string;                 // Inbound message text
+  media?: {                     // Attached media (already downloaded & decrypted)
+    type: "image" | "audio" | "video" | "file";
+    filePath: string;
+    mimeType: string;
+    fileName?: string;
+  };
+  onToolCall?: (msg: string) => Promise<void>; // Verbose mode callback
+}
+
+interface ChatResponse {
+  text?: string;                // Reply text (markdown → plain text before send)
+  media?: {                     // Reply media
+    type: "image" | "video" | "file";
+    url: string;                // Local absolute path or http(s):// URL
+    fileName?: string;
+  };
+  cancelled?: boolean;          // True if the turn was cancelled — skip sending
+}
+```
+
+---
+
+## Proactive messaging
+
+After `start()` returns a `Bot` instance you can push messages at any time:
+
+```typescript
+const bot = await start(agent);
+
+// Send text
+await bot.sendMessage("Task finished.");
+
+// Send an image
+await bot.sendMessage({
+  text: "Here is your report",
+  media: { type: "image", url: "/tmp/report.png" },
+});
+```
+
+> Requires the user to have sent at least one message so a `context_token` is cached (valid ~20 hours, persisted to disk across restarts).
+
+---
+
+## Development
 
 ```bash
 pnpm install
-pnpm --filter weixin-agent-sdk run build   # SDK 需先构建
+pnpm --filter weixin-agent-sdk run build   # build SDK first
 pnpm --filter weixin-acp run build
 pnpm run typecheck
 ```
+
+---
 
 ## License
 
